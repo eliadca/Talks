@@ -1,7 +1,6 @@
 package com.eliadca.talks.ui.talks
 
 import android.app.Application
-import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -18,12 +17,10 @@ import com.eliadca.talks.data.LoadedSpeech
 import com.eliadca.talks.data.db.TalkSessionEntity
 import com.eliadca.talks.speech.AndroidSpeechEngine
 import com.eliadca.talks.speech.EngineError
-import com.eliadca.talks.speech.ModelDownload
 import com.eliadca.talks.speech.SessionSummary
 import com.eliadca.talks.speech.SpeechEngine
 import com.eliadca.talks.speech.SpeechEvent
 import com.eliadca.talks.speech.TalksSession
-import com.eliadca.talks.speech.VoskModelManager
 import com.eliadca.talks.speech.VoskSpeechEngine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
@@ -62,14 +59,6 @@ class TalksViewModel(private val app: Application) : AndroidViewModel(app) {
         private set
     private var testEngine: SpeechEngine? = null
     private var testJob: Job? = null
-
-    // --- offline model ------------------------------------------------------------------------
-    val vosk = VoskModelManager(app)
-    var voskInstalled by mutableStateOf(vosk.isInstalled())
-        private set
-    var voskProgress by mutableStateOf<ModelDownload?>(null)
-        private set
-    private var downloadJob: Job? = null
 
     private var loadedFor: Long? = null
 
@@ -122,7 +111,7 @@ class TalksViewModel(private val app: Application) : AndroidViewModel(app) {
     // --- engines --------------------------------------------------------------------------------
 
     private fun createEngine(s: AppSettings): SpeechEngine = when (s.engine) {
-        EngineKind.VOSK -> VoskSpeechEngine(app, vosk.modelDir)
+        EngineKind.VOSK -> VoskSpeechEngine(app, container.voskModel.manager.modelDir)
         EngineKind.ANDROID -> AndroidSpeechEngine(
             app,
             AndroidSpeechEngine.Config(s.language, s.preferOffline, s.forceGoogleService, s.muteSounds),
@@ -214,36 +203,6 @@ class TalksViewModel(private val app: Application) : AndroidViewModel(app) {
         summary = null
         startToken = 0
         phase = TalksPhase.PREPARE
-    }
-
-    // --- offline model --------------------------------------------------------------------------
-
-    fun downloadVoskModel() {
-        if (downloadJob?.isActive == true) return
-        downloadJob = viewModelScope.launch {
-            vosk.download().collect { handleModelEvent(it) }
-        }
-    }
-
-    fun importVoskModel(uri: Uri) {
-        if (downloadJob?.isActive == true) return
-        downloadJob = viewModelScope.launch {
-            vosk.importZip(uri).collect { handleModelEvent(it) }
-        }
-    }
-
-    fun cancelModelDownload() {
-        downloadJob?.cancel()
-        voskProgress = null
-    }
-
-    private fun handleModelEvent(e: ModelDownload) {
-        voskProgress = if (e is ModelDownload.Done) null else e
-        if (e is ModelDownload.Done) voskInstalled = true
-    }
-
-    fun clearModelMessage() {
-        voskProgress = null
     }
 
     override fun onCleared() {

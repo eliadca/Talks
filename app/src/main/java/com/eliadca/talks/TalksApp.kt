@@ -6,6 +6,8 @@ import com.eliadca.talks.core.sample.SampleContent
 import com.eliadca.talks.data.SettingsRepository
 import com.eliadca.talks.data.SpeechRepository
 import com.eliadca.talks.data.db.TalksDatabase
+import com.eliadca.talks.speech.VoskModelController
+import com.eliadca.talks.speech.VoskModelManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +21,8 @@ class TalksApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // If the app died while Talks had the sound muted, give the volume back.
+        com.eliadca.talks.speech.SoundMuter(this).restoreIfLeftMuted()
         container.startUp()
     }
 }
@@ -29,6 +33,7 @@ class AppContainer(private val context: Context) {
     val database: TalksDatabase by lazy { TalksDatabase.build(context) }
     val settings: SettingsRepository by lazy { SettingsRepository(context) }
     val speeches: SpeechRepository by lazy { SpeechRepository(database) }
+    val voskModel: VoskModelController by lazy { VoskModelController(VoskModelManager(context), scope) }
 
     fun startUp() {
         scope.launch {

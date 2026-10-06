@@ -51,6 +51,7 @@ fun SettingsScreen(
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onBack: () -> Unit,
     extra: @Composable () -> Unit = {},
+    data: @Composable () -> Unit = {},
 ) {
     Column(
         Modifier
@@ -159,6 +160,7 @@ fun SettingsScreen(
                         settings.volumeKeys,
                     ) { v -> onChange { it.copy(volumeKeys = v) } }
                 }
+                data()
                 Column(Modifier.padding(bottom = 24.dp)) {}
             }
         }

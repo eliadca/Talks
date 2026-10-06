@@ -94,6 +94,8 @@ import com.eliadca.talks.data.ReaderTheme
 import com.eliadca.talks.speech.EngineState
 import com.eliadca.talks.speech.ModelDownload
 import com.eliadca.talks.speech.TalksSession
+import com.eliadca.talks.speech.VoskModelController
+import com.eliadca.talks.container
 import com.eliadca.talks.ui.findActivity
 import com.eliadca.talks.ui.formatClock
 import com.eliadca.talks.ui.home.formatDuration
@@ -136,8 +138,9 @@ fun TalksScreen(
         vm.session?.pause()
     }
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> hasMic = granted }
+    val model = context.container.voskModel
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) vm.importVoskModel(uri)
+        if (uri != null) model.importZip(uri)
     }
 
     ImmersiveAndAwake()
@@ -260,6 +263,7 @@ fun TalksScreen(
             )
             TalksPhase.PREPARE -> PreparePanel(
                 vm = vm,
+                model = model,
                 settings = settings,
                 hasMic = hasMic,
                 onRequestMic = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
@@ -571,6 +575,7 @@ private fun TextControl(text: String, ink: Color, onClick: () -> Unit) {
 @Composable
 private fun PreparePanel(
     vm: TalksViewModel,
+    model: VoskModelController,
     settings: AppSettings,
     hasMic: Boolean,
     onRequestMic: () -> Unit,
@@ -584,9 +589,10 @@ private fun PreparePanel(
     val serviceAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
     val doc = vm.speech?.doc
     val seconds = doc?.estimatedSeconds(settings.wordsPerMinute, settings.readHeadings) ?: 0
+    val voskInstalled by model.installed.collectAsState()
     val engineReady = when (settings.engine) {
         EngineKind.ANDROID -> serviceAvailable
-        EngineKind.VOSK -> vm.voskInstalled
+        EngineKind.VOSK -> voskInstalled
     }
     val canStart = engineReady
 
@@ -631,7 +637,7 @@ private fun PreparePanel(
                     if (serviceAvailable) "Servicio de voz de Android · ${settings.language}" + if (settings.preferOffline) " · sin conexión preferido" else ""
                     else "Este dispositivo no tiene servicio de reconocimiento. Usa el modo sin conexión."
                 EngineKind.VOSK ->
-                    if (vm.voskInstalled) "Sin conexión (Vosk) · modelo instalado, ${vm.vosk.sizeOnDiskMb()} MB"
+                    if (voskInstalled) "Sin conexión (Vosk) · modelo instalado, ${remember(voskInstalled) { model.manager.sizeOnDiskMb() }} MB"
                     else "Falta el modelo de voz sin conexión (unos 40 MB)."
             }
             CheckRow(ok = engineReady, title = "Reconocimiento de voz", detail = engineDetail) {
@@ -648,7 +654,7 @@ private fun PreparePanel(
                             label = { Text("Sin conexión (Vosk)") },
                         )
                     }
-                    if (settings.engine == EngineKind.VOSK) ModelControls(vm, onImportModel)
+                    if (settings.engine == EngineKind.VOSK) ModelControls(model, onImportModel)
                 }
             }
 
@@ -717,19 +723,20 @@ private fun PreparePanel(
 }
 
 @Composable
-private fun ModelControls(vm: TalksViewModel, onImport: () -> Unit) {
-    val p = vm.voskProgress
+fun ModelControls(model: VoskModelController, onImport: () -> Unit) {
+    val p by model.progress.collectAsState()
+    val installed by model.installed.collectAsState()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        when (p) {
+        when (val state = p) {
             is ModelDownload.Progress -> {
-                if (p.fraction >= 0) LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth())
+                if (state.fraction >= 0) LinearProgressIndicator(progress = { state.fraction }, modifier = Modifier.fillMaxWidth())
                 else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (p.fraction >= 0) "Descargando… ${(p.fraction * 100).toInt()} %" else "Descargando…",
+                        if (state.fraction >= 0) "Descargando… ${(state.fraction * 100).toInt()} %" else "Descargando…",
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = vm::cancelModelDownload) { Text("Cancelar") }
+                    TextButton(onClick = model::cancel) { Text("Cancelar") }
                 }
             }
             ModelDownload.Installing -> {
@@ -738,7 +745,7 @@ private fun ModelControls(vm: TalksViewModel, onImport: () -> Unit) {
             }
             is ModelDownload.Failed -> {
                 Text(
-                    "No se pudo instalar: ${p.message}",
+                    "No se pudo instalar: ${state.message}",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
                 )
             }
@@ -746,8 +753,8 @@ private fun ModelControls(vm: TalksViewModel, onImport: () -> Unit) {
         }
         if (p !is ModelDownload.Progress && p != ModelDownload.Installing) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!vm.voskInstalled) {
-                    Button(onClick = vm::downloadVoskModel) {
+                if (!installed) {
+                    Button(onClick = model::download) {
                         Icon(Icons.Filled.Download, null, Modifier.size(18.dp))
                         Spacer(Modifier.size(6.dp))
                         Text("Descargar modelo")

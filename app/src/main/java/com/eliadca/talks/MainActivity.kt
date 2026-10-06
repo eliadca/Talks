@@ -21,7 +21,8 @@ import com.eliadca.talks.export.Exporter
 import com.eliadca.talks.ui.editor.EditorViewModel
 import com.eliadca.talks.ui.home.HomeScreen
 import com.eliadca.talks.ui.home.HomeViewModel
-import com.eliadca.talks.ui.settings.SettingsScreen
+import com.eliadca.talks.ui.home.LibraryFilter
+import com.eliadca.talks.ui.settings.SettingsRoute
 import com.eliadca.talks.ui.talks.TalksScreen
 import com.eliadca.talks.ui.theme.TalksTheme
 import com.eliadca.talks.ui.theme.isDarkFor
@@ -83,10 +84,15 @@ private fun TalksRoot() {
                 )
             }
             composable("settings") {
-                SettingsScreen(
+                SettingsRoute(
                     settings = settings,
                     onChange = { change -> scope.launch { container.settings.update(change) } },
                     onBack = { nav.popBackStack() },
+                    onImported = { id ->
+                        home.setFilter(LibraryFilter.All)
+                        home.select(id)
+                        nav.popBackStack()
+                    },
                 )
             }
             composable(
