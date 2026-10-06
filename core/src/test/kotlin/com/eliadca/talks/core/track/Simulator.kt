@@ -21,6 +21,14 @@ class SimConfig(
     val scriptVocabularyInImprov: Double = 0.0,
     /** False simulates a recogniser that only delivers final results. */
     val emitPartials: Boolean = true,
+    /** Chance per sentence of a long stretch of speech about something else entirely. */
+    val offTopicPerSentence: Double = 0.0,
+    val offTopicMin: Int = 40,
+    val offTopicMax: Int = 160,
+    /** Natural running text the off-topic speech is taken from (consecutive words). */
+    val offTopicCorpus: List<String> = emptyList(),
+    /** Chance that, after going off topic, the speaker comes back at the next sentence instead of where they left. */
+    val offTopicResumeNext: Double = 0.3,
 )
 
 class SimEvent(
@@ -33,9 +41,13 @@ class SimEvent(
     val wordsSoFar: Int,
     /** True while the speaker is digressing: the tracker should keep the position where they left the script. */
     val digressing: Boolean = false,
+    /** Which off-topic stretch this event belongs to (-1: none). */
+    val offTopicId: Int = -1,
+    /** Index of the off-topic stretch that ended most recently before this event (-1: none yet). */
+    val afterOffTopic: Int = -1,
 )
 
-class SimRun(val events: List<SimEvent>, val jumps: List<Int>)
+class SimRun(val events: List<SimEvent>, val jumps: List<Int>, val offTopicCount: Int = 0)
 
 /** Words used for improvisation, fillers and substitutions: deliberately unrelated to the scripts. */
 private val POOL = (
@@ -54,7 +66,14 @@ private val FILLERS = listOf("eh", "este", "pues", "mm", "bueno")
 object Simulator {
 
     fun generate(index: ScriptIndex, cfg: SimConfig, rng: Random): SimRun {
-        data class Spoken(val word: String, val truthAfter: Int, val graded: Boolean, val digressing: Boolean = false)
+        data class Spoken(
+            val word: String,
+            val truthAfter: Int,
+            val graded: Boolean,
+            val digressing: Boolean = false,
+            val offTopicId: Int = -1,
+            val afterOffTopic: Int = -1,
+        )
 
         val n = index.size
         val tokens = index.tokens
@@ -62,6 +81,7 @@ object Simulator {
         val jumpWordIdx = ArrayList<Int>()
         var pos = 0
         var grace = 0
+        var offTopicCount = 0
 
         fun sentenceStart(p: Int) = p == 0 || tokens[p - 1].boundary >= Boundary.SENTENCE
         fun nextSentenceStart(p: Int): Int {
@@ -88,6 +108,18 @@ object Simulator {
         }
 
         while (pos < n) {
+            if (sentenceStart(pos) && pos > 0 && cfg.offTopicCorpus.isNotEmpty() && rng.nextDouble() < cfg.offTopicPerSentence) {
+                // A long stretch about something else entirely, taken as running text from the corpus.
+                val k = rng.nextInt(cfg.offTopicMin, cfg.offTopicMax + 1)
+                val start = rng.nextInt(cfg.offTopicCorpus.size)
+                val id = offTopicCount++
+                repeat(k) { i -> spoken += Spoken(cfg.offTopicCorpus[(start + i) % cfg.offTopicCorpus.size], pos, false, true, id) }
+                if (rng.nextDouble() < cfg.offTopicResumeNext) {
+                    val next = nextSentenceStart(pos)
+                    if (next < n) pos = next
+                }
+                grace = 8
+            }
             if (sentenceStart(pos)) {
                 val r = rng.nextDouble()
                 var edge = cfg.digressionPerSentence
@@ -150,6 +182,16 @@ object Simulator {
             if (grace > 0) grace--
         }
 
+        // Remember, for every word, which off-topic stretch ended last before it.
+        run {
+            var last = -1
+            for (k in spoken.indices) {
+                val w = spoken[k]
+                if (w.offTopicId >= 0) last = w.offTopicId
+                else if (last >= 0) spoken[k] = w.copy(afterOffTopic = last)
+            }
+        }
+
         // Cut the stream of words into recogniser sessions with growing, sometimes truncated, partials.
         val events = ArrayList<SimEvent>()
         var i = 0
@@ -163,13 +205,15 @@ object Simulator {
                     val w = words.last()
                     words[words.lastIndex] = w.substring(0, maxOf(2, (w.length * 0.6).toInt()))
                 }
-                events += SimEvent(words.joinToString(" "), false, spoken[k].truthAfter, spoken[k].graded, k + 1, spoken[k].digressing)
+                val sk = spoken[k]
+                events += SimEvent(words.joinToString(" "), false, sk.truthAfter, sk.graded, k + 1, sk.digressing, sk.offTopicId, sk.afterOffTopic)
             }
             val finalWords = (i until end).joinToString(" ") { spoken[it].word }
-            events += SimEvent(finalWords, true, spoken[end - 1].truthAfter, spoken[end - 1].graded, end, spoken[end - 1].digressing)
+            val se = spoken[end - 1]
+            events += SimEvent(finalWords, true, se.truthAfter, se.graded, end, se.digressing, se.offTopicId, se.afterOffTopic)
             i = end + if (cfg.gapMax > 0) rng.nextInt(0, cfg.gapMax + 1) else 0
         }
-        return SimRun(events, jumpWordIdx)
+        return SimRun(events, jumpWordIdx, offTopicCount)
     }
 }
 

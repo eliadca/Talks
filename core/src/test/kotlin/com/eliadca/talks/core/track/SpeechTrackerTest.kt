@@ -46,6 +46,41 @@ class SpeechTrackerTest {
         assertTrue(kotlin.math.abs(t.state.position - (indexOf("aqui") + 1)) <= 2)
     }
 
+    @Test fun aLongTalkAboutSomethingElseLeavesTheMarkerWhereTheSpeakerLeftTheText() {
+        val practice = SampleScripts.practice
+        val t = SpeechTracker(practice)
+        val words = practice.tokens.map { it.norm }
+        // Read the opening two paragraphs as growing partial results, a session per sentence or so.
+        val read = 40
+        var k = 0
+        while (k < read) {
+            val end = minOf(read, k + 10)
+            for (m in k + 1..end) t.onHypothesis(words.subList(k, m).joinToString(" "), isFinal = m == end)
+            k = end
+        }
+        val left = t.state.position
+        assertTrue("reading: pos=$left", left in read - 2..read)
+        // Two minutes about the airport, the football match, the traffic, the weather...
+        val chatter = OffTopicSimulationTest.OFF_TOPIC
+        var i = 0
+        var statusDuring = TrackStatus.FOLLOWING
+        while (i < chatter.size) {
+            val end = minOf(chatter.size, i + 12)
+            for (m in i + 1..end) {
+                val st = t.onHypothesis(chatter.subList(i, m).joinToString(" "), isFinal = m == end)
+                assertTrue("the marker moved during the chatter: $left -> ${st.position} after '${chatter.subList(i, m).joinToString(" ")}'", kotlin.math.abs(st.position - left) <= 3)
+                statusDuring = st.status
+            }
+            i = end
+        }
+        assertEquals(TrackStatus.OFF_SCRIPT, statusDuring)
+        // Back to the speech, right where it was left.
+        val resume = words.subList(t.state.position, t.state.position + 8)
+        for (m in 1..resume.size) t.onHypothesis(resume.take(m).joinToString(" "), isFinal = m == resume.size)
+        assertTrue("found again: pos=${t.state.position} expected≈${left + 8}", kotlin.math.abs(t.state.position - (left + 8)) <= 2)
+        assertEquals(TrackStatus.FOLLOWING, t.state.status)
+    }
+
     @Test fun jumpsAheadWhenTheSpeakerSkips() {
         val t = SpeechTracker(index)
         t.onHypothesis("buenos dias a todos", true)

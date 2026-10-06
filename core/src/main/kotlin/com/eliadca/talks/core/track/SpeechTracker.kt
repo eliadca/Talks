@@ -6,6 +6,7 @@ import com.eliadca.talks.core.text.SpanishText
 import com.eliadca.talks.core.text.Tokenizer
 import java.util.Arrays
 import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.min
 
 /** Tunable probabilities of the tracking model. The defaults come from simulation (see tests). */
@@ -38,6 +39,18 @@ data class TrackerConfig(
     val jumpConfidence: Float = 0.55f,
     /** How many consecutive recogniser updates must agree on a big move before it is shown. */
     val jumpConfirmations: Int = 2,
+    /** Evidence (bits of matched script words) needed for ordinary progress of the marker. */
+    val stepBits: Double = 12.0,
+    /** Evidence needed to move the marker again after the speaker improvised. */
+    val reentryBits: Double = 20.0,
+    /** Evidence needed to skip ahead, and to jump back or far ahead. */
+    val moveBits: Double = 24.0,
+    val jumpBits: Double = 30.0,
+    /** Most extra heard words, and most skipped script words, between two matched words of a phrase. */
+    val maxHeardGap: Int = 3,
+    val maxScriptGap: Int = 4,
+    /** After this many heard words that do not read as the script at the marker, the speaker is improvising. */
+    val offScriptWords: Int = 3,
 )
 
 enum class TrackStatus {
@@ -82,6 +95,14 @@ data class TrackerState(
  * Recognisers send growing, sometimes revised, partial hypotheses followed by a final one. Each
  * hypothesis is therefore re-evaluated from the belief at the start of its session, which makes
  * revisions harmless; only a final hypothesis commits.
+ *
+ * The marker shown to the speaker does not simply follow the model: natural speech about something
+ * else is full of little phrases ("de la", "que no", "esta mañana") that also occur somewhere in the
+ * script, and the model can be fooled by them. So every move of the marker must be backed by the
+ * words just heard actually reading as the script text up to the new place, in order and with
+ * enough information (rare words count for a lot, "de" or "que" for almost nothing). Big moves need
+ * more of that evidence than ordinary progress, and coming back from an improvisation needs a real
+ * phrase of the script. Until then the marker stays where the speaker left the text.
  *
  * Not thread-safe: call from a single thread.
  */
@@ -163,12 +184,19 @@ class SpeechTracker(
     /** Words of the in-flight recogniser session that were heard before a manual reposition. */
     private var stale: List<HeardWord> = emptyList()
 
+    /** The last words of finished recogniser sessions (newest last), so evidence can span sessions. */
+    private val history = ArrayDeque<HeardWord>()
+
     private var displayPos = 0
     private var confidence = 0f
     private var status = TrackStatus.WAITING
     private var pendingPos = -1
     private var pendingCount = 0
     private var backCount = 0
+
+    /** Words heard since the speech last read as the script at the marker. */
+    private var unsupportedWords = 0
+    private var offScript = false
 
     init {
         reset(0)
@@ -194,6 +222,8 @@ class SpeechTracker(
         confidence = 1f
         status = TrackStatus.WAITING
         pendingPos = -1; pendingCount = 0; backCount = 0
+        history.clear()
+        unsupportedWords = 0; offScript = false
     }
 
     /**
@@ -210,6 +240,9 @@ class SpeechTracker(
         confidence = 1f
         status = if (hasSpoken) TrackStatus.FOLLOWING else TrackStatus.WAITING
         pendingPos = -1; pendingCount = 0; backCount = 0
+        // Words heard before the move belong to the old place.
+        history.clear()
+        unsupportedWords = 0; offScript = false
     }
 
     /**
@@ -245,7 +278,7 @@ class SpeechTracker(
         runForward(words, prefixLast = !isFinal)
         lastWords = words
         hasSpoken = true
-        updateDisplay(result, newWords)
+        updateDisplay(result, newWords, recentWords(words), prefixLast = !isFinal)
         if (isFinal) {
             closeSegment()
             stale = emptyList()
@@ -257,7 +290,10 @@ class SpeechTracker(
 
     private fun openSegment() {
         base.copyFrom(committed)
-        if (hasSpoken) blurForGap(base)
+        if (hasSpoken) {
+            blurForGap(base)
+            anchorAtMarker(base)
+        }
         segmentOpen = true
     }
 
@@ -266,7 +302,39 @@ class SpeechTracker(
             committed.copyFrom(result)
             segmentOpen = false
         }
+        for (w in lastWords) {
+            history.addLast(w)
+            if (history.size > HISTORY) history.removeFirst()
+        }
         lastWords = emptyList()
+    }
+
+    /**
+     * Keeps alive the possibility that the speaker is still off the script right where the marker
+     * is. During a long improvisation the model's belief can be dragged around by chance matches;
+     * this keeps the place where the speaker left the text in play, so they are found at once when
+     * they come back to it.
+     */
+    private fun anchorAtMarker(b: Belief) {
+        val p = displayPos.coerceIn(0, n)
+        if (b.hi < b.lo) {
+            b.setPoint(p)
+            return
+        }
+        b.free[p] += ANCHOR_MASS
+        if (p < b.lo) b.lo = p
+        if (p > b.hi) b.hi = p
+        normalize(b)
+    }
+
+    /** The most recent heard words, across sessions: the last finished ones followed by [current]. */
+    private fun recentWords(current: List<HeardWord>): List<HeardWord> {
+        val fromCurrent = min(current.size, HISTORY)
+        val fromHistory = min(history.size, HISTORY - fromCurrent)
+        val out = ArrayList<HeardWord>(fromHistory + fromCurrent)
+        for (k in history.size - fromHistory until history.size) out += history[k]
+        for (k in current.size - fromCurrent until current.size) out += current[k]
+        return out
     }
 
     /**
@@ -460,9 +528,91 @@ class SpeechTracker(
         return out
     }
 
+    // --- evidence -----------------------------------------------------------------------------
+
+    /** How strongly the latest heard words read as the script text that ends just before a place. */
+    private class Support(val bits: Double, val matches: Int, val content: Int) {
+        fun atLeast(minBits: Double, minMatches: Int, minContent: Int = 0) =
+            bits >= minBits && matches >= minMatches && content >= minContent
+    }
+
+    /** Information carried by hearing [norm] where it was expected: "de" is worth little, "esperanza" a lot. */
+    private fun info(norm: String): Double =
+        (-ln(SpanishFrequency.probability(norm)) / LN2).coerceIn(MIN_INFO, MAX_INFO)
+
+    /**
+     * The best chain of heard words matched, in order, to script words ending right before [pos]:
+     * matches add their information, words in between (extra words heard, script words skipped)
+     * cost a little, and the chain must reach the last couple of words on both sides. A speaker who
+     * is reading produces long chains of many bits; chance matches in unrelated speech produce
+     * short chains of common words.
+     */
+    private fun support(recent: List<HeardWord>, prefixLast: Boolean, pos: Int): Support {
+        val m = recent.size
+        if (m == 0 || pos <= 0 || n == 0) return NO_SUPPORT
+        val end = min(pos, n)
+        val j0 = maxOf(0, end - SUPPORT_WINDOW)
+        val w = end - j0
+        val score = DoubleArray(m * w)
+        val count = IntArray(m * w)
+        val content = IntArray(m * w)
+        var bestBits = 0.0
+        var bestCount = 0
+        var bestContent = 0
+        for (i in 0 until m) {
+            val word = recent[i]
+            val sim = similarity(word, prefixLast && i == m - 1)
+            val bits = info(word.norm)
+            val isContent = if (bits >= CONTENT_BITS) 1 else 0
+            for (j in 0 until w) {
+                val k = i * w + j
+                val sv = sim[index.tokenVocab[j0 + j]].toDouble()
+                if (sv < MIN_MATCH) {
+                    score[k] = -1.0
+                    continue
+                }
+                val gain = bits * sv
+                var sc = gain
+                var c = 1
+                var ct = isContent
+                // Extend a chain that ended a little earlier on both sides. Gaps are kept short:
+                // a reader may add a word or lose a couple, but a chain must not bridge a stretch
+                // of unrelated speech or a skipped passage.
+                for (i2 in maxOf(0, i - 1 - config.maxHeardGap) until i) {
+                    val row = i2 * w
+                    val heardGap = HEARD_GAP * (i - i2 - 1)
+                    for (j2 in maxOf(0, j - 1 - config.maxScriptGap) until j) {
+                        val prev = score[row + j2]
+                        if (prev <= 0.0) continue
+                        val cand = prev - heardGap - SCRIPT_GAP * (j - j2 - 1) + gain
+                        if (cand > sc) {
+                            sc = cand
+                            c = count[row + j2] + 1
+                            ct = content[row + j2] + isContent
+                        }
+                    }
+                }
+                score[k] = sc
+                count[k] = c
+                content[k] = ct
+                val tailHeard = m - 1 - i
+                val tailScript = end - 1 - (j0 + j)
+                if (tailHeard <= MAX_TAIL && tailScript <= MAX_TAIL) {
+                    val total = sc - HEARD_GAP * tailHeard - SCRIPT_GAP * tailScript
+                    if (total > bestBits) {
+                        bestBits = total
+                        bestCount = c
+                        bestContent = ct
+                    }
+                }
+            }
+        }
+        return if (bestCount == 0) NO_SUPPORT else Support(bestBits, bestCount, bestContent)
+    }
+
     // --- output filter ----------------------------------------------------------------------
 
-    private fun updateDisplay(b: Belief, newWords: Int) {
+    private fun updateDisplay(b: Belief, newWords: Int, recent: List<HeardWord>, prefixLast: Boolean) {
         if (b.hi < b.lo) return
         var best = b.lo
         var bestV = -1.0
@@ -478,38 +628,71 @@ class SpeechTracker(
         var mass = 0.0
         for (p in maxOf(b.lo, best - 3)..min(b.hi, best + 3)) mass += b.total(p)
         confidence = mass.toFloat()
-        status = when {
-            freeMass >= 0.6 -> TrackStatus.OFF_SCRIPT
-            confidence >= 0.4f -> TrackStatus.FOLLOWING
-            else -> TrackStatus.SEARCHING
-        }
 
+        val atBest = support(recent, prefixLast, best)
         val delta = best - displayPos
-        // Moving forward by about as many words as were just heard is normal reading.
-        val allowance = config.freeForward + newWords * 2
-        // Several words that all agree on a far-away place are strong evidence on their own.
-        val strong = newWords >= 4 && confidence >= 0.8f
+        // Ordinary progress: about as many words as were just heard.
+        val stepLimit = newWords + 2
+        var moved = false
         when {
-            delta == 0 -> { pendingCount = 0; backCount = 0 }
-            delta in 1..allowance -> accept(best)
-            delta in -3..-1 -> {
+            delta == 0 -> { pendingPos = -1; pendingCount = 0; backCount = 0 }
+            delta in 1..stepLimit -> {
+                // Coming back from an improvisation needs a real phrase of the script; while
+                // reading, the words just heard only have to continue the text.
+                val ok = if (offScript) atBest.atLeast(config.reentryBits, 3, 1) else atBest.atLeast(config.stepBits, 2)
+                if (ok) {
+                    accept(best)
+                    moved = true
+                }
+            }
+            delta in -2..-1 -> {
                 // A small step back is usually a revised partial hypothesis; wait for it to persist.
                 backCount++
-                if (backCount >= 3) accept(best)
+                if (backCount >= 3 && atBest.atLeast(config.stepBits, 2)) {
+                    accept(best)
+                    moved = true
+                }
             }
             else -> {
-                // A big move (a skip or a jump back) must be confident and repeated.
-                if (strong) {
-                    accept(best)
-                } else if (confidence >= config.jumpConfidence) {
-                    if (pendingPos >= 0 && abs(pendingPos - best) <= 6) pendingCount++ else {
-                        pendingPos = best; pendingCount = 1
+                // A skip ahead or a jump: the model must be sure and the words must clearly read as
+                // the script at the new place; unless the evidence is overwhelming, it must also
+                // hold for a second update.
+                val far = delta < 0 || delta > FAR_WORDS
+                val needBits = if (far) config.jumpBits else config.moveBits
+                val needMatches = if (far) 4 else 3
+                if (confidence >= config.jumpConfidence && atBest.atLeast(needBits, needMatches, 1)) {
+                    if (atBest.atLeast(needBits + SURE_EXTRA_BITS, needMatches + 1, 1)) {
+                        accept(best)
+                        moved = true
+                    } else {
+                        if (pendingPos >= 0 && abs(pendingPos - best) <= 6) pendingCount++ else {
+                            pendingPos = best; pendingCount = 1
+                        }
+                        if (pendingCount >= config.jumpConfirmations) {
+                            accept(best)
+                            moved = true
+                        }
                     }
-                    if (pendingCount >= config.jumpConfirmations) accept(best)
                 } else {
                     pendingPos = -1; pendingCount = 0
                 }
             }
+        }
+
+        // Is the speaker reading the text at the marker right now?
+        val here = if (moved || best == displayPos) atBest else support(recent, prefixLast, displayPos)
+        if (here.atLeast(config.stepBits, 2)) {
+            unsupportedWords = 0
+            offScript = false
+        } else {
+            unsupportedWords += newWords
+            if (unsupportedWords >= config.offScriptWords || freeMass >= 0.6) offScript = true
+        }
+        status = when {
+            offScript && pendingPos >= 0 -> TrackStatus.SEARCHING
+            offScript -> TrackStatus.OFF_SCRIPT
+            confidence >= 0.4f -> TrackStatus.FOLLOWING
+            else -> TrackStatus.SEARCHING
         }
     }
 
@@ -520,6 +703,40 @@ class SpeechTracker(
 
     private companion object {
         const val PRUNE = 1e-9
+        val LN2 = ln(2.0)
+
+        /** Heard words kept across recogniser sessions for checking evidence. */
+        const val HISTORY = 12
+
+        /** How many script words before a place are searched for the words just heard. */
+        const val SUPPORT_WINDOW = 16
+
+        /** A heard word must be at least this likely to be the script word to count as a match. */
+        const val MIN_MATCH = 0.45
+        const val MIN_INFO = 3.0
+        const val MAX_INFO = 16.0
+
+        /** Words carrying at least this much information are content words, not little function words. */
+        const val CONTENT_BITS = 9.5
+
+        /** Cost, in bits, of an extra heard word inside a chain and of a skipped script word. */
+        const val HEARD_GAP = 4.0
+        const val SCRIPT_GAP = 2.0
+
+        /** A chain must end within this many words of the end on both sides. */
+        const val MAX_TAIL = 2
+
+        /** Extra evidence that makes a big move certain enough to show at once, without confirmation. */
+        const val SURE_EXTRA_BITS = 14.0
+
+        /** Forward moves farther than this are treated like jumps. */
+        const val FAR_WORDS = 60
+
+
+        /** Belief kept at the marker, off-script, at the start of every recogniser session. */
+        const val ANCHOR_MASS = 0.05
+
+        private val NO_SUPPORT = Support(0.0, 0, 0)
 
         /** Farthest ahead a half-heard word (the unfinished last word of a partial result) may match. */
         const val PREFIX_REACH = 4
