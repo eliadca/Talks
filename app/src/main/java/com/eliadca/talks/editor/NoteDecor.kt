@@ -26,9 +26,9 @@ object NoteDecor {
         if (!canvas.getClipBounds(clip) || layout.lineCount == 0) return
         visibleFirst = layout.getLineForVertical(clip.top.coerceAtLeast(0))
         visibleLast = layout.getLineForVertical(clip.bottom.coerceAtLeast(0))
-        val from = layout.getLineStart(visibleFirst)
-        val to = layout.getLineEnd(visibleLast)
-        val spans = sp.getSpans(from, to, NoteSpan::class.java)
+        val viewStart = layout.getLineStart(visibleFirst)
+        val viewEnd = layout.getLineEnd(visibleLast)
+        val spans = sp.getSpans(viewStart, viewEnd, NoteSpan::class.java)
         if (spans.isEmpty()) return
         val ranges = spans
             .map { sp.getSpanStart(it) to sp.getSpanEnd(it) }
