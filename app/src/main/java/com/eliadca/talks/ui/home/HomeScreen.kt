@@ -1,19 +1,29 @@
 package com.eliadca.talks.ui.home
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.SnackbarHost
@@ -22,7 +32,6 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,8 +54,9 @@ import com.eliadca.talks.ui.editor.EditorViewModel
 import kotlinx.coroutines.launch
 
 /**
- * The main screen. Large tablets show folders, the list and the editor side by side; medium
- * windows show the list and the editor with folders in a drawer; phones show one at a time.
+ * The main screen. The menu is folded into a slim rail (its full version opens on demand, never
+ * by swiping); the list of speeches sits next to the editor when there is room for both, and can
+ * be folded away to write with the whole screen. Narrow windows show the list or the editor.
  */
 @Composable
 fun HomeScreen(
@@ -72,6 +83,8 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     var confirmDelete by remember { mutableStateOf<SpeechListItem?>(null) }
+    /** Writing with the whole screen: the list of speeches is folded away. */
+    var focusMode by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(selectedId) { editor.open(selectedId) }
     LaunchedEffect(Unit) {
@@ -82,6 +95,8 @@ fun HomeScreen(
     }
 
     val pace = if (home.paceWpm > 0) home.paceWpm else settings.wordsPerMinute
+    val openMenu: () -> Unit = { scope.launch { drawerState.open() } }
+    val closeMenu: () -> Unit = { scope.launch { drawerState.close() } }
 
     BoxWithConstraints(
         Modifier
@@ -89,28 +104,11 @@ fun HomeScreen(
             .background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
-        val large = maxWidth >= LARGE_WIDTH
-        val twoPane = maxWidth >= MEDIUM_WIDTH
-        val sidebar: @Composable (Modifier) -> Unit = { mod ->
-            SidebarContent(
-                filter = filter,
-                counts = counts,
-                folders = folders,
-                onFilter = {
-                    home.setFilter(it)
-                    scope.launch { drawerState.close() }
-                },
-                onNewSpeech = {
-                    home.createSpeech()
-                    scope.launch { drawerState.close() }
-                },
-                onNewFolder = home::createFolder,
-                onUpdateFolder = home::updateFolder,
-                onDeleteFolder = home::deleteFolder,
-                onSettings = onOpenSettings,
-                modifier = mod,
-            )
-        }
+        val showRail = maxWidth >= RAIL_MIN_WIDTH
+        val listWidth = if (maxWidth >= 1200.dp) 360.dp else 330.dp
+        val railWidth = if (showRail) RAIL_WIDTH else 0.dp
+        val twoPane = maxWidth - railWidth - listWidth >= MIN_EDITOR_WIDTH
+
         val list: @Composable (Modifier) -> Unit = { mod ->
             SpeechListPane(
                 items = items,
@@ -120,8 +118,8 @@ fun HomeScreen(
                 query = query,
                 sort = sort,
                 paceWpm = pace,
-                showMenuButton = !large,
-                onMenu = { scope.launch { drawerState.open() } },
+                showMenuButton = !showRail,
+                onMenu = openMenu,
                 onQuery = home::setQuery,
                 onSort = home::setSort,
                 onSelect = home::select,
@@ -154,7 +152,13 @@ fun HomeScreen(
                     Icons.Filled.EditNote, "Elige un discurso",
                     "Selecciona uno de la lista o crea uno nuevo para empezar a escribir.",
                     modifier = mod.fillMaxSize(),
-                    action = { TextButton(onClick = home::createSpeech) { Text("Nuevo discurso") } },
+                    action = {
+                        FilledTonalButton(onClick = home::createSpeech) {
+                            Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Nuevo discurso")
+                        }
+                    },
                 )
             } else {
                 EditorPane(
@@ -166,6 +170,8 @@ fun HomeScreen(
                     paceWpm = pace,
                     actions = actions,
                     onBack = if (compact) ({ home.select(null) }) else null,
+                    focusMode = if (compact) null else focusMode,
+                    onToggleFocus = { focusMode = !focusMode },
                     onStartTalks = { selectedId?.let(onStartTalks) },
                     dark = dark,
                     modifier = mod,
@@ -173,29 +179,70 @@ fun HomeScreen(
             }
         }
 
-        when {
-            large -> Row(Modifier.fillMaxSize()) {
-                sidebar(Modifier.width(264.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainer))
-                list(Modifier.width(372.dp).fillMaxHeight())
-                VerticalDivider()
-                editorPane(Modifier.weight(1f).fillMaxHeight(), false)
-            }
-            twoPane -> ModalNavigationDrawer(
-                drawerState = drawerState,
-                drawerContent = { ModalDrawerSheet { sidebar(Modifier) } },
-            ) {
-                Row(Modifier.fillMaxSize()) {
-                    list(Modifier.width(340.dp).fillMaxHeight())
-                    VerticalDivider()
-                    editorPane(Modifier.weight(1f).fillMaxHeight(), false)
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            // Only a swipe that closes the open menu is honoured: scrolling never opens it.
+            gesturesEnabled = drawerState.isOpen,
+            drawerContent = {
+                ModalDrawerSheet(Modifier.width(320.dp)) {
+                    SidebarContent(
+                        filter = filter,
+                        counts = counts,
+                        folders = folders,
+                        onFilter = {
+                            home.setFilter(it)
+                            closeMenu()
+                        },
+                        onNewSpeech = {
+                            home.createSpeech()
+                            closeMenu()
+                        },
+                        onNewFolder = home::createFolder,
+                        onUpdateFolder = home::updateFolder,
+                        onDeleteFolder = home::deleteFolder,
+                        onSettings = {
+                            closeMenu()
+                            onOpenSettings()
+                        },
+                        onClose = closeMenu,
+                    )
                 }
-            }
-            else -> ModalNavigationDrawer(
-                drawerState = drawerState,
-                drawerContent = { ModalDrawerSheet { sidebar(Modifier) } },
-            ) {
-                BackHandler(enabled = selectedId != null) { home.select(null) }
-                if (selectedId == null) list(Modifier.fillMaxSize()) else editorPane(Modifier.fillMaxSize(), true)
+            },
+        ) {
+            Row(Modifier.fillMaxSize()) {
+                if (showRail) {
+                    LibraryRail(
+                        filter = filter,
+                        counts = counts,
+                        onMenu = openMenu,
+                        onNewSpeech = home::createSpeech,
+                        onFilter = { f ->
+                            home.setFilter(f)
+                            focusMode = false
+                        },
+                        onFolders = openMenu,
+                        onSettings = onOpenSettings,
+                        modifier = Modifier.width(RAIL_WIDTH).fillMaxHeight(),
+                    )
+                }
+                if (twoPane) {
+                    AnimatedVisibility(
+                        visible = !(focusMode && selectedId != null),
+                        enter = expandHorizontally(),
+                        exit = shrinkHorizontally(),
+                    ) {
+                        Row(Modifier.fillMaxHeight()) {
+                            list(Modifier.width(listWidth).fillMaxHeight())
+                            VerticalDivider()
+                        }
+                    }
+                    editorPane(Modifier.weight(1f).fillMaxHeight(), false)
+                } else {
+                    BackHandler(enabled = selectedId != null) { home.select(null) }
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        if (selectedId == null) list(Modifier.fillMaxSize()) else editorPane(Modifier.fillMaxSize(), true)
+                    }
+                }
             }
         }
 
@@ -224,8 +271,12 @@ fun HomeScreen(
     }
 }
 
-private val LARGE_WIDTH: Dp = 1060.dp
-private val MEDIUM_WIDTH: Dp = 700.dp
+/** From this width on, the menu is a slim rail at the side. */
+private val RAIL_MIN_WIDTH: Dp = 600.dp
+private val RAIL_WIDTH: Dp = 88.dp
+
+/** The editor next to the list must be at least this wide; otherwise they take turns. */
+private val MIN_EDITOR_WIDTH: Dp = 520.dp
 
 /** Stands in for "all trashed speeches" in the delete confirmation. */
 private val EMPTY_TRASH_MARKER = SpeechListItem(-1, "", "", 0, null, false, 0, 0, 0, 0, null, null)

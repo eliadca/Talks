@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ApplicationProvider
@@ -20,6 +21,9 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.typeText
+import androidx.test.espresso.action.ViewActions.swipeDown
+import androidx.test.espresso.action.ViewActions.swipeRight
+import androidx.test.espresso.action.ViewActions.swipeUp
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
@@ -155,6 +159,47 @@ class AppFlowTest {
         return false
     }
 
+    /** Rotating by 90 degrees from the natural landscape makes this tablet portrait. */
+    private fun forcePortrait(): Boolean {
+        val ua = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val metrics = { compose.activity.resources.displayMetrics }
+        for (rotation in intArrayOf(UiAutomation.ROTATION_FREEZE_90, UiAutomation.ROTATION_FREEZE_270, UiAutomation.ROTATION_FREEZE_0)) {
+            ua.setRotation(rotation)
+            val ok = runCatching { compose.waitUntil(6_000) { metrics().widthPixels < metrics().heightPixels }; true }.getOrDefault(false)
+            if (ok) return true
+        }
+        return false
+    }
+
+    private fun findReader(v: android.view.View): ReaderView? {
+        if (v is ReaderView) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findReader(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
+    /** Scroll state of the reader, read on the main thread. */
+    private fun readerState(): String {
+        var out = "no reader"
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            val r = findReader(compose.activity.window.decorView)
+            if (r != null) {
+                out = "scrollY=${r.scrollY} height=${r.height} content=${r.getChildAt(0).height} " +
+                    "readingLine=${r.readingLineOffset()} manual=${r.manual} follow=${r.autoFollow}"
+            }
+        }
+        return out
+    }
+
+    /** Clicks the on-screen clickable node with [text] (the closed menu holds off-screen twins). */
+    private fun clickVisible(text: String) {
+        val width = compose.activity.resources.displayMetrics.widthPixels
+        val nodes = compose.onAllNodes(hasText(text) and hasClickAction())
+        val all = nodes.fetchSemanticsNodes()
+        val i = all.indexOfFirst { it.boundsInRoot.left >= 0f && it.boundsInRoot.right <= width + 1 }
+        assertTrue("no visible '$text' among ${all.size}", i >= 0)
+        nodes[i].performClick()
+    }
+
     private fun assertShown(text: String) {
         val n = compose.onAllNodesWithText(text).fetchSemanticsNodes().size
         assertTrue("'$text' should be on screen (found $n)", n > 0)
@@ -207,8 +252,8 @@ class AppFlowTest {
     }
 
     @Test
-    fun tabletLandscapeShowsFoldersListAndEditorSideBySide() {
-        runBlocking { container.speeches.create("Charla A", Markup.parse("Texto de A")) }
+    fun tabletLandscapeShowsTheMenuRailTheListAndTheEditorSideBySide() {
+        runBlocking { container.speeches.create("Charla A", SampleContent.welcome) }
         waitForText("Charla A")
         val landscape = forceLandscape()
         val metrics = compose.activity.resources.displayMetrics
@@ -216,13 +261,56 @@ class AppFlowTest {
         Log.i("TALKS_TEST", "landscape=$landscape size=${metrics.widthPixels}x${metrics.heightPixels} density=${metrics.density}")
         assertTrue("the tablet must be in landscape", landscape)
         compose.onRoot().printToLog("TALKS_TREE_TABLET")
-        // Sidebar, list and (empty) editor are all visible at once.
-        assertShown("Papelera")
-        assertShown("Nuevo discurso")
+        // The folded menu (rail), the list and the (empty) editor are all visible at once.
+        assertShown("Todos")
+        assertShown("Ajustes")
         assertShown("Elige un discurso")
         compose.onAllNodesWithText("Charla A")[0].performClick()
         onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
         Shots.take("tablet-landscape-editing")
+
+        // Writing with the whole screen folds the list away, and brings it back.
+        compose.onNodeWithContentDescription("Escribir a pantalla completa").performClick()
+        compose.waitForIdle()
+        Shots.take("tablet-focus")
+        compose.onNodeWithContentDescription("Mostrar la lista de discursos").performClick()
+
+        // The full menu opens from the rail.
+        compose.onNodeWithContentDescription("Abrir el menú").performClick()
+        compose.waitForIdle()
+        Thread.sleep(400)
+        Shots.take("menu-open")
+        compose.onNodeWithContentDescription("Cerrar el menú").performClick()
+    }
+
+    @Test
+    fun portraitTabletTakesTurnsAndScrollingNeverOpensTheMenu() {
+        runBlocking { container.speeches.create("Charla vertical", SampleContent.practice) }
+        waitForText("Charla vertical")
+        assertTrue("the tablet must be in portrait", forcePortrait())
+        compose.waitForIdle()
+        Shots.take("portrait-library")
+        compose.onAllNodesWithText("Charla vertical")[0].performClick()
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+        Shots.take("portrait-editor")
+        // The reported bug: moving through the speech opened the side menu.
+        onView(isAssignableFrom(RichEditText::class.java)).perform(swipeUp(), swipeRight(), swipeDown())
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Cerrar el menú").assertIsNotDisplayed()
+        compose.onNodeWithContentDescription("Volver a la lista").performClick()
+        waitForText("Charla vertical")
+    }
+
+    @Test
+    fun settingsOpenFromTheMenu() {
+        forceLandscape()
+        waitForText("Ajustes")
+        clickVisible("Ajustes")
+        waitForText("Modo Talks")
+        compose.waitForIdle()
+        Shots.take("settings")
+        compose.onNodeWithContentDescription("Volver").performClick()
+        waitForText("Todos")
     }
 
     @Test
@@ -276,6 +364,8 @@ class AppFlowTest {
         // And reads the rest of the speech to the very end.
         fake.hear(words.drop(36).joinToString(" "), final = true)
         waitForText("Fin del discurso", timeoutMs = 20_000)
+        Thread.sleep(1200)
+        Log.i("TALKS_TEST", "reader at the end: ${readerState()}")
         Shots.take("talks-finished")
 
         compose.onNodeWithText("Terminar y ver resumen").performClick()

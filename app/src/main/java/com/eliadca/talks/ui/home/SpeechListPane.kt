@@ -2,6 +2,15 @@ package com.eliadca.talks.ui.home
 
 import android.text.format.DateUtils
 import androidx.compose.foundation.background
+import com.eliadca.talks.ui.components.TipIconButton
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TextField
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,14 +41,11 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -93,39 +99,50 @@ fun SpeechListPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showMenuButton) {
-                IconButton(onClick = onMenu) { Icon(Icons.Filled.Menu, contentDescription = "Carpetas y ajustes") }
+                IconButton(onClick = onMenu) { Icon(Icons.Filled.Menu, contentDescription = "Abrir el menú") }
             }
-            Text(
-                titleFor(filter, folderById),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f).padding(start = if (showMenuButton) 0.dp else 8.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(Modifier.weight(1f).padding(start = if (showMenuButton) 0.dp else 10.dp)) {
+                Text(
+                    titleFor(filter, folderById),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    when (items.size) {
+                        0 -> "Ninguno"
+                        1 -> "1 discurso"
+                        else -> "${items.size} discursos"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (!isTrash) {
                 Box {
-                    IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Ordenar") }
+                    TipIconButton(Icons.AutoMirrored.Filled.Sort, "Ordenar") { sortMenu = true }
                     DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                         for (s in SortKey.entries) {
                             DropdownMenuItem(
-                                text = { Text(s.label + if (s == sort) "  ✓" else "") },
+                                text = { Text(s.label) },
+                                trailingIcon = { if (s == sort) Icon(Icons.Filled.Check, contentDescription = null) },
                                 onClick = { onSort(s); sortMenu = false },
                             )
                         }
                     }
                 }
-                IconButton(onClick = onNew) { Icon(Icons.Filled.Add, contentDescription = "Nuevo discurso") }
+                FilledTonalIconButton(onClick = onNew) { Icon(Icons.Filled.Add, contentDescription = "Nuevo discurso") }
             } else if (items.isNotEmpty()) {
                 TextButton(onClick = onEmptyTrash) { Text("Vaciar") }
             }
         }
 
         if (!isTrash) {
-            OutlinedTextField(
+            TextField(
                 value = query,
                 onValueChange = onQuery,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                 singleLine = true,
                 placeholder = { Text("Buscar en todos los discursos") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
@@ -134,7 +151,14 @@ fun SpeechListPane(
                         IconButton(onClick = { onQuery("") }) { Icon(Icons.Filled.Close, contentDescription = "Borrar búsqueda") }
                     }
                 },
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(28.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             )
         } else {
@@ -183,6 +207,24 @@ fun SpeechListPane(
     }
 }
 
+/** A small fact under a speech: its length in time or in words. */
+@Composable
+private fun MetaChip(icon: androidx.compose.ui.graphics.vector.ImageVector?, text: String) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(4.dp))
+        }
+        Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
 private fun titleFor(filter: LibraryFilter, folders: Map<Long, FolderEntity>): String = when (filter) {
     LibraryFilter.All -> "Discursos"
     LibraryFilter.Pinned -> "Fijados"
@@ -208,68 +250,70 @@ private fun SpeechCard(
     val colors = MaterialTheme.colorScheme
     var menu by remember { mutableStateOf(false) }
     val seconds = if (paceWpm > 0) item.wordCount * 60 / paceWpm else 0
+    val shape = RoundedCornerShape(18.dp)
 
     Box {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = if (selected) colors.primaryContainer else colors.surface,
-            ),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier
+        Row(
+            Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .combinedClickable(onClick = onClick, onLongClick = { menu = true }),
+                .clip(shape)
+                .background(if (selected) colors.secondaryContainer else colors.surface)
+                .border(1.dp, if (selected) colors.secondary.copy(alpha = 0.5f) else colors.outlineVariant.copy(alpha = 0.6f), shape)
+                .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                .height(IntrinsicSize.Min),
         ) {
-            Row(Modifier.fillMaxWidth()) {
-                if (item.color != 0) {
-                    Box(Modifier.width(5.dp).fillMaxHeight().background(Color(item.color)))
+            // The colour label runs down the left edge.
+            Box(
+                Modifier
+                    .width(6.dp)
+                    .fillMaxHeight()
+                    .background(if (item.color != 0) Color(item.color) else Color.Transparent),
+            )
+            Column(Modifier.weight(1f).padding(start = 10.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        item.title.ifBlank { "Sin título" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (item.title.isBlank()) colors.onSurfaceVariant else colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (item.pinned) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Filled.PushPin, contentDescription = "Fijado", tint = colors.primary, modifier = Modifier.size(16.dp))
+                    }
                 }
-                Column(Modifier.weight(1f).padding(horizontal = 14.dp, vertical = 12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            item.title.ifBlank { "Sin título" },
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (item.title.isBlank()) colors.onSurfaceVariant else colors.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (item.pinned) {
-                            Icon(Icons.Filled.PushPin, contentDescription = "Fijado", tint = colors.primary, modifier = Modifier.size(16.dp))
+                if (item.preview.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        item.preview,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MetaChip(Icons.Filled.Timer, formatDuration(seconds))
+                    MetaChip(null, "${item.wordCount} palabras")
+                    if (folder != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(Color(folder.color)))
+                            Spacer(Modifier.width(5.dp))
+                            Text(folder.name, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
-                    if (item.preview.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            item.preview,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        val stamp = if (isTrash && item.trashedAt != null) item.trashedAt else item.updatedAt
-                        Text(
-                            DateUtils.getRelativeTimeSpanString(stamp, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.onSurfaceVariant,
-                        )
-                        Text(
-                            "${item.wordCount} palabras · ${formatDuration(seconds)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.onSurfaceVariant,
-                        )
-                        if (folder != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Folder, null, tint = Color(folder.color), modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(3.dp))
-                                Text(folder.name, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    }
+                    Spacer(Modifier.weight(1f))
+                    val stamp = if (isTrash && item.trashedAt != null) item.trashedAt else item.updatedAt
+                    Text(
+                        DateUtils.getRelativeTimeSpanString(stamp, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.85f),
+                        maxLines = 1,
+                    )
                 }
             }
         }

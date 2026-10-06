@@ -17,6 +17,8 @@ object Shots {
     fun take(label: String, longSide: Int = 1280, quality: Int = 70) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.waitForIdleSync()
+        // Let the latest frame reach the screen.
+        Thread.sleep(350)
         val bmp = instrumentation.uiAutomation.takeScreenshot() ?: run {
             Log.i(TAG, "$label 0/0 none")
             return

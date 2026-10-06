@@ -727,7 +727,7 @@ private fun ManualBar(palette: ReaderPalette, onFollowFromHere: () -> Unit) {
     Surface(
         Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp).widthIn(max = 860.dp),
         shape = RoundedCornerShape(26.dp),
-        color = Color(palette.background).copy(alpha = 0.95f),
+        color = Color(palette.background),
         border = BorderStroke(1.dp, accent.copy(alpha = 0.6f)),
         shadowElevation = 10.dp,
     ) {

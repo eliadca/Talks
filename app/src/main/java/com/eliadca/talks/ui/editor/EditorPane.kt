@@ -3,6 +3,19 @@ package com.eliadca.talks.ui.editor
 import android.view.ContextThemeWrapper
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import com.eliadca.talks.ui.components.TipIconButton
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Notes
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +46,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,6 +92,9 @@ fun EditorPane(
     paceWpm: Int,
     actions: SpeechActions,
     onBack: (() -> Unit)?,
+    /** Whether the list is folded away for writing; null where the list and the editor take turns. */
+    focusMode: Boolean?,
+    onToggleFocus: () -> Unit,
     onStartTalks: () -> Unit,
     dark: Boolean,
     modifier: Modifier = Modifier,
@@ -100,24 +115,59 @@ fun EditorPane(
     var showMenu by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<EditorDialog?>(null) }
 
+    val folder = item?.folderId?.let { id -> folders.firstOrNull { it.id == id } }
+
     Column(modifier.background(MaterialTheme.colorScheme.surface)) {
         // --- top bar ---
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .height(64.dp)
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            if (onBack != null) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver") }
+            when {
+                onBack != null -> TipIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Volver a la lista", onClick = onBack)
+                focusMode != null -> TipIconButton(
+                    if (focusMode) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                    if (focusMode) "Mostrar la lista de discursos" else "Escribir a pantalla completa",
+                    onClick = onToggleFocus,
+                )
             }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = { c.findOpen = !c.findOpen }) { Icon(Icons.Filled.Search, contentDescription = "Buscar en el discurso") }
-            IconButton(onClick = { dialog = EditorDialog.Outline }) { Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = "Esquema") }
-            IconButton(onClick = { dialog = EditorDialog.History }) { Icon(Icons.Filled.History, contentDescription = "Versiones anteriores") }
+            // Where the speech lives.
+            Row(
+                Modifier
+                    .weight(1f)
+                    .padding(start = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Folder, null,
+                    tint = folder?.let { androidx.compose.ui.graphics.Color(it.color) } ?: MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    folder?.name ?: "Sin carpeta",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (item?.pinned == true) {
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.Filled.PushPin, "Fijado", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                }
+            }
+            TipIconButton(Icons.AutoMirrored.Filled.Undo, "Deshacer (Ctrl+Z)", enabled = c.canUndo) { c.undo() }
+            TipIconButton(Icons.AutoMirrored.Filled.Redo, "Rehacer (Ctrl+Y)", enabled = c.canRedo) { c.redo() }
+            BarSeparator()
+            TipIconButton(Icons.Filled.Search, "Buscar y reemplazar (Ctrl+F)", active = c.findOpen) { c.findOpen = !c.findOpen }
+            TipIconButton(Icons.AutoMirrored.Filled.ViewList, "Esquema por títulos") { dialog = EditorDialog.Outline }
+            TipIconButton(Icons.Filled.History, "Versiones anteriores") { dialog = EditorDialog.History }
             Box {
-                IconButton(onClick = { showMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Más opciones") }
+                TipIconButton(Icons.Filled.MoreVert, "Más opciones") { showMenu = true }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
                         text = { Text(if (item?.pinned == true) "Quitar de fijados" else "Fijar arriba") },
@@ -139,6 +189,7 @@ fun EditorPane(
                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.Label, null) },
                         onClick = { showMenu = false; dialog = EditorDialog.Label },
                     )
+                    HorizontalDivider()
                     DropdownMenuItem(
                         text = { Text("Duplicar") },
                         leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
@@ -154,6 +205,7 @@ fun EditorPane(
                         leadingIcon = { Icon(Icons.Filled.PictureAsPdf, null) },
                         onClick = { showMenu = false; vm.flushNow(); actions.exportPdf() },
                     )
+                    HorizontalDivider()
                     DropdownMenuItem(
                         text = { Text("Mover a la papelera") },
                         leadingIcon = { Icon(Icons.Filled.Delete, null) },
@@ -161,15 +213,24 @@ fun EditorPane(
                     )
                 }
             }
-            Button(onClick = { vm.flushNow(); onStartTalks() }) {
+            Spacer(Modifier.width(6.dp))
+            Button(
+                onClick = { vm.flushNow(); onStartTalks() },
+                modifier = Modifier.height(46.dp),
+                contentPadding = PaddingValues(horizontal = 18.dp),
+            ) {
+                Icon(Icons.Filled.RecordVoiceOver, null, Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
                 Text("Talks", fontWeight = FontWeight.Bold)
             }
+            Spacer(Modifier.width(4.dp))
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
         AnimatedVisibility(c.findOpen) {
             FindBar(c, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
         }
-        Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
             FormatToolbar(c, Modifier.widthIn(max = 1100.dp))
         }
 
@@ -183,20 +244,17 @@ fun EditorPane(
         }
 
         // --- status line ---
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
         Row(
             Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                .padding(horizontal = 20.dp, vertical = 6.dp),
+                .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("$words palabras", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                "≈ ${formatDuration(seconds)} a $paceWpm ppm",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            StatusItem(Icons.Filled.Notes, "$words palabras")
+            StatusItem(Icons.Filled.Timer, "≈ ${formatDuration(seconds)} a $paceWpm ppm")
             if (target > 0) {
                 val diff = seconds - target * 60
                 val label = when {
@@ -211,11 +269,7 @@ fun EditorPane(
                 )
             }
             Spacer(Modifier.weight(1f))
-            Text(
-                if (vm.saving) "Guardando…" else "Guardado",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            StatusItem(if (vm.saving) Icons.Filled.Sync else Icons.Filled.CloudDone, if (vm.saving) "Guardando…" else "Guardado")
         }
     }
 
@@ -251,6 +305,25 @@ fun EditorPane(
             onDismiss = { dialog = null },
         )
     }
+}
+
+@Composable
+private fun StatusItem(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun BarSeparator() {
+    VerticalDivider(
+        Modifier
+            .padding(horizontal = 6.dp)
+            .height(24.dp),
+        color = MaterialTheme.colorScheme.outlineVariant,
+    )
 }
 
 private sealed interface EditorDialog {

@@ -79,6 +79,7 @@ class EditorController : EditorListener {
     fun undo() { view?.undo() }
     fun redo() { view?.redo() }
     fun insertText(text: String) { view?.insertAtCursor(text) }
+    fun insertNote() { view?.insertNote() }
     fun goTo(offset: Int) { view?.goTo(offset) }
 
     fun find(query: String) { view?.find(query) }

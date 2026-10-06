@@ -4,6 +4,9 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -104,7 +107,7 @@ fun SettingsRoute(
             }
         },
         data = {
-            Section("Copia de seguridad e importación") {
+            Section("Copia de seguridad e importación", Icons.Filled.Backup) {
                 ActionRow(
                     "Crear copia de seguridad",
                     "Guarda todos tus discursos, carpetas y versiones en un archivo que puedes llevarte a otro dispositivo.",
@@ -123,7 +126,7 @@ fun SettingsRoute(
                     )
                 }
             }
-            Section("Acerca de Talks") {
+            Section("Acerca de Talks", Icons.Filled.Info) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Talks ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
                     Text(

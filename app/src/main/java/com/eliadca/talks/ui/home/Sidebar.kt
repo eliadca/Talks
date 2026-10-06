@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,6 +26,17 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -52,7 +64,92 @@ import com.eliadca.talks.data.db.FolderEntity
 import com.eliadca.talks.ui.components.ColorSwatch
 import com.eliadca.talks.ui.theme.LabelColors
 
-/** Folders, trash and settings. A permanent column on large tablets, a drawer elsewhere. */
+/**
+ * The menu folded into a slim rail: new speech, the main lists, folders (which open the full
+ * menu) and the settings at the bottom. Nothing here reacts to swipes, so scrolling a speech
+ * never opens a menu by accident.
+ */
+@Composable
+fun LibraryRail(
+    filter: LibraryFilter,
+    counts: LibraryCounts,
+    onMenu: () -> Unit,
+    onNewSpeech: () -> Unit,
+    onFilter: (LibraryFilter) -> Unit,
+    onFolders: () -> Unit,
+    onSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val itemColors = NavigationRailItemDefaults.colors(
+        selectedIconColor = colors.onSecondaryContainer,
+        indicatorColor = colors.secondaryContainer,
+    )
+    NavigationRail(
+        modifier = modifier,
+        containerColor = colors.surfaceContainer,
+        // The screen already keeps clear of the system bars.
+        windowInsets = WindowInsets(0, 0, 0, 0),
+        header = {
+            IconButton(onClick = onMenu) { Icon(Icons.Filled.Menu, contentDescription = "Abrir el menú") }
+            FloatingActionButton(
+                onClick = onNewSpeech,
+                containerColor = colors.primary,
+                contentColor = colors.onPrimary,
+                elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation(),
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Nuevo discurso")
+            }
+        },
+    ) {
+        Spacer(Modifier.height(16.dp))
+        NavigationRailItem(
+            selected = filter == LibraryFilter.All,
+            onClick = { onFilter(LibraryFilter.All) },
+            icon = { Icon(Icons.Filled.Description, contentDescription = null) },
+            label = { Text("Todos") },
+            colors = itemColors,
+        )
+        NavigationRailItem(
+            selected = filter == LibraryFilter.Pinned,
+            onClick = { onFilter(LibraryFilter.Pinned) },
+            icon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+            label = { Text("Fijados") },
+            colors = itemColors,
+        )
+        NavigationRailItem(
+            selected = filter is LibraryFilter.Folder || filter == LibraryFilter.NoFolder,
+            onClick = onFolders,
+            icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+            label = { Text("Carpetas") },
+            colors = itemColors,
+        )
+        NavigationRailItem(
+            selected = filter == LibraryFilter.Trash,
+            onClick = { onFilter(LibraryFilter.Trash) },
+            icon = {
+                if (counts.trash > 0) {
+                    BadgedBox(badge = { Badge { Text(counts.trash.toString()) } }) { Icon(Icons.Filled.Delete, contentDescription = null) }
+                } else {
+                    Icon(Icons.Filled.Delete, contentDescription = null)
+                }
+            },
+            label = { Text("Papelera") },
+            colors = itemColors,
+        )
+        Spacer(Modifier.weight(1f))
+        NavigationRailItem(
+            selected = false,
+            onClick = onSettings,
+            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+            label = { Text("Ajustes") },
+            colors = itemColors,
+        )
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+/** The full menu: lists, folders, trash and settings. Opens over the screen from the rail. */
 @Composable
 fun SidebarContent(
     filter: LibraryFilter,
@@ -65,6 +162,7 @@ fun SidebarContent(
     onDeleteFolder: (Long) -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    onClose: (() -> Unit)? = null,
 ) {
     var folderDialog by remember { mutableStateOf<FolderEntity?>(null) }
     var newFolder by remember { mutableStateOf(false) }
@@ -79,7 +177,10 @@ fun SidebarContent(
                 Icon(Icons.Filled.Mic, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.size(10.dp))
-            Text("Talks", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Talks", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            if (onClose != null) {
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Cerrar el menú") }
+            }
         }
         Spacer(Modifier.height(14.dp))
         Button(onClick = onNewSpeech, modifier = Modifier.fillMaxWidth()) {

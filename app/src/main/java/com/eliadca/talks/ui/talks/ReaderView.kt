@@ -24,6 +24,7 @@ import android.widget.ScrollView
 import com.eliadca.talks.core.doc.RichDoc
 import com.eliadca.talks.data.ReaderTheme
 import com.eliadca.talks.editor.EditorStyle
+import com.eliadca.talks.editor.NoteDecor
 import com.eliadca.talks.editor.SpannableCodec
 import kotlin.math.abs
 import kotlin.math.max
@@ -371,6 +372,7 @@ class ReaderView(context: Context) : ScrollView(context) {
 
             val follow = !manual && nextEnd > nextStart
             if (follow) drawChunkTint(canvas, l, pal)
+            NoteDecor.draw(canvas, l, text, style)
             l.draw(canvas)
             if (!manual && cfg.dimSpoken && spokenEnd > 0) drawDimmedPast(canvas, l, pal)
             if (follow) {

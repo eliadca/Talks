@@ -1,6 +1,15 @@
 package com.eliadca.talks.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,9 +68,10 @@ fun SettingsScreen(
             .background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver") }
-            Text("Ajustes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(4.dp))
+            Text("Ajustes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Column(
@@ -71,7 +81,7 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Section("Apariencia") {
+                Section("Apariencia", Icons.Filled.Palette) {
                     ChoiceRow(
                         "Tema", themeLabel(settings.themeMode),
                         listOf(ThemeMode.SYSTEM to "Según el sistema", ThemeMode.LIGHT to "Claro", ThemeMode.DARK to "Oscuro"),
@@ -83,7 +93,7 @@ fun SettingsScreen(
                     SwitchRow("Letra con serifa en el editor", null, settings.editorSerif) { v -> onChange { it.copy(editorSerif = v) } }
                 }
 
-                Section("Reconocimiento de voz") {
+                Section("Reconocimiento de voz", Icons.Filled.Mic) {
                     ChoiceRow(
                         "Idioma y variante", SPANISH_VARIANTS.firstOrNull { it.first == settings.language }?.second ?: settings.language,
                         SPANISH_VARIANTS, settings.language,
@@ -116,7 +126,7 @@ fun SettingsScreen(
                     extra()
                 }
 
-                Section("Modo Talks") {
+                Section("Modo Talks", Icons.Filled.RecordVoiceOver) {
                     SliderRow("Tamaño de letra", settings.readerFontSp.toFloat(), 24f..110f, "${settings.readerFontSp} sp") { v ->
                         onChange { it.copy(readerFontSp = v.roundToInt()) }
                     }
@@ -186,17 +196,27 @@ private fun readerThemeLabel(t: ReaderTheme) = when (t) {
 }
 
 @Composable
-fun Section(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            title.uppercase(),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 8.dp),
-        )
+fun Section(title: String, icon: ImageVector? = null, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.padding(start = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        }
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            shape = MaterialTheme.shapes.large,
+            shape = RoundedCornerShape(22.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
         ) {
             Column(Modifier.padding(vertical = 6.dp)) { content() }
         }

@@ -1,6 +1,12 @@
 package com.eliadca.talks.ui.editor
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -18,8 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
 import androidx.compose.material.icons.automirrored.filled.FormatIndentIncrease
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
-import androidx.compose.material.icons.automirrored.filled.Redo
-import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.FormatAlignCenter
 import androidx.compose.material.icons.filled.FormatAlignLeft
@@ -35,7 +39,6 @@ import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.StrikethroughS
 import androidx.compose.material.icons.filled.Title
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -66,74 +69,139 @@ import com.eliadca.talks.ui.components.ColorSwatch
 import com.eliadca.talks.ui.theme.HighlightColors
 import com.eliadca.talks.ui.theme.TextColors
 
-/** The formatting bar above the page. It scrolls sideways when the screen is narrow. */
+/**
+ * The formatting bar above the page, in groups: paragraph style, character style, colour and
+ * size, lists, alignment, and notes. It scrolls sideways when the screen is narrow.
+ */
 @Composable
 fun FormatToolbar(c: EditorController, modifier: Modifier = Modifier) {
     val f = c.format
     Surface(
         modifier,
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Row(
             Modifier
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ToolButton(Icons.AutoMirrored.Filled.Undo, "Deshacer", enabled = c.canUndo) { c.undo() }
-            ToolButton(Icons.AutoMirrored.Filled.Redo, "Rehacer", enabled = c.canRedo) { c.redo() }
-            Sep()
-            ToolButton(Icons.Filled.FormatBold, "Negrita (Ctrl+B)", active = f.bold) { c.toggle(InlineKind.BOLD); c.focus() }
-            ToolButton(Icons.Filled.FormatItalic, "Cursiva (Ctrl+I)", active = f.italic) { c.toggle(InlineKind.ITALIC); c.focus() }
-            ToolButton(Icons.Filled.FormatUnderlined, "Subrayado (Ctrl+U)", active = f.underline) { c.toggle(InlineKind.UNDERLINE); c.focus() }
-            ToolButton(Icons.Filled.StrikethroughS, "Tachado", active = f.strike) { c.toggle(InlineKind.STRIKE); c.focus() }
-            Sep()
-            PaletteButton(Icons.Filled.FormatColorText, "Color del texto", TextColors, f.color, "Color predeterminado") {
-                c.setColor(it); c.focus()
+            TextStyleMenu(f.block) { c.toggleBlock(it); c.focus() }
+            ToolGroup {
+                ToolButton(Icons.Filled.FormatBold, "Negrita (Ctrl+B)", active = f.bold) { c.toggle(InlineKind.BOLD); c.focus() }
+                ToolButton(Icons.Filled.FormatItalic, "Cursiva (Ctrl+I)", active = f.italic) { c.toggle(InlineKind.ITALIC); c.focus() }
+                ToolButton(Icons.Filled.FormatUnderlined, "Subrayado (Ctrl+U)", active = f.underline) { c.toggle(InlineKind.UNDERLINE); c.focus() }
+                ToolButton(Icons.Filled.StrikethroughS, "Tachado", active = f.strike) { c.toggle(InlineKind.STRIKE); c.focus() }
             }
-            PaletteButton(Icons.Filled.FormatColorFill, "Resaltado", HighlightColors, f.highlight, "Quitar resaltado") {
-                c.setHighlight(it); c.focus()
+            ToolGroup {
+                PaletteButton(Icons.Filled.FormatColorText, "Color del texto", TextColors, f.color, "Color predeterminado") {
+                    c.setColor(it); c.focus()
+                }
+                PaletteButton(Icons.Filled.FormatColorFill, "Resaltado", HighlightColors, f.highlight, "Quitar resaltado") {
+                    c.setHighlight(it); c.focus()
+                }
+                SizeButton(f.sizePercent) { c.setSizePercent(it); c.focus() }
             }
-            SizeButton(f.sizePercent) { c.setSizePercent(it); c.focus() }
-            Sep()
-            HeadingButton(f.block) { c.toggleBlock(it); c.focus() }
-            ToolButton(Icons.AutoMirrored.Filled.FormatListBulleted, "Lista con viñetas", active = f.block == BlockType.BULLET) {
-                c.toggleBlock(BlockType.BULLET); c.focus()
+            ToolGroup {
+                ToolButton(Icons.AutoMirrored.Filled.FormatListBulleted, "Lista con viñetas", active = f.block == BlockType.BULLET) {
+                    c.toggleBlock(BlockType.BULLET); c.focus()
+                }
+                ToolButton(Icons.Filled.FormatListNumbered, "Lista numerada", active = f.block == BlockType.NUMBER) {
+                    c.toggleBlock(BlockType.NUMBER); c.focus()
+                }
+                ToolButton(Icons.Filled.CheckBox, "Lista de tareas", active = f.block == BlockType.CHECK) {
+                    c.toggleBlock(BlockType.CHECK); c.focus()
+                }
+                ToolButton(Icons.Filled.FormatQuote, "Cita", active = f.block == BlockType.QUOTE) {
+                    c.toggleBlock(BlockType.QUOTE); c.focus()
+                }
             }
-            ToolButton(Icons.Filled.FormatListNumbered, "Lista numerada", active = f.block == BlockType.NUMBER) {
-                c.toggleBlock(BlockType.NUMBER); c.focus()
+            ToolGroup {
+                ToolButton(Icons.Filled.FormatAlignLeft, "Alinear a la izquierda", active = f.align == Align.START) { c.setAlign(Align.START); c.focus() }
+                ToolButton(Icons.Filled.FormatAlignCenter, "Centrar", active = f.align == Align.CENTER) { c.setAlign(Align.CENTER); c.focus() }
+                ToolButton(Icons.Filled.FormatAlignRight, "Alinear a la derecha", active = f.align == Align.END) { c.setAlign(Align.END); c.focus() }
+                ToolButton(Icons.AutoMirrored.Filled.FormatIndentDecrease, "Reducir sangría") { c.indent(-1); c.focus() }
+                ToolButton(Icons.AutoMirrored.Filled.FormatIndentIncrease, "Aumentar sangría") { c.indent(1); c.focus() }
             }
-            ToolButton(Icons.Filled.CheckBox, "Lista de tareas", active = f.block == BlockType.CHECK) {
-                c.toggleBlock(BlockType.CHECK); c.focus()
+            ToolGroup {
+                ToolButton(Icons.Filled.EditNote, "Nota para ti: se ve, pero no se espera que la digas", active = f.stage) {
+                    c.insertNote(); c.focus()
+                }
+                ToolButton(Icons.Filled.FormatClear, "Quitar formato") { c.clearFormatting(); c.focus() }
             }
-            ToolButton(Icons.Filled.FormatQuote, "Cita", active = f.block == BlockType.QUOTE) {
-                c.toggleBlock(BlockType.QUOTE); c.focus()
-            }
-            Sep()
-            ToolButton(Icons.Filled.FormatAlignLeft, "Alinear a la izquierda", active = f.align == Align.START) { c.setAlign(Align.START); c.focus() }
-            ToolButton(Icons.Filled.FormatAlignCenter, "Centrar", active = f.align == Align.CENTER) { c.setAlign(Align.CENTER); c.focus() }
-            ToolButton(Icons.Filled.FormatAlignRight, "Alinear a la derecha", active = f.align == Align.END) { c.setAlign(Align.END); c.focus() }
-            ToolButton(Icons.AutoMirrored.Filled.FormatIndentDecrease, "Reducir sangría") { c.indent(-1); c.focus() }
-            ToolButton(Icons.AutoMirrored.Filled.FormatIndentIncrease, "Aumentar sangría") { c.indent(1); c.focus() }
-            Sep()
-            ToolButton(Icons.Filled.VisibilityOff, "Nota para mí: se ve pero no se lee en voz alta", active = f.stage) {
-                c.toggle(InlineKind.STAGE); c.focus()
-            }
-            ToolButton(Icons.Filled.FormatClear, "Quitar formato") { c.clearFormatting(); c.focus() }
         }
     }
 }
 
+/** A rounded group of related buttons on the toolbar. */
 @Composable
-private fun Sep() {
-    VerticalDivider(
+private fun ToolGroup(content: @Composable RowScope.() -> Unit) {
+    Row(
         Modifier
-            .padding(horizontal = 4.dp)
-            .height(26.dp),
-        color = MaterialTheme.colorScheme.outlineVariant,
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
     )
+}
+
+/** The paragraph style, shown by name: Texto, Título grande, Título, Subtítulo. */
+@Composable
+private fun TextStyleMenu(current: BlockType, onPick: (BlockType) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+    val label = when (current) {
+        BlockType.H1 -> "Título grande"
+        BlockType.H2 -> "Título"
+        BlockType.H3 -> "Subtítulo"
+        else -> "Texto"
+    }
+    Box {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(colors.surface)
+                .clickable(role = Role.Button, onClickLabel = "Estilo del párrafo") { open = true }
+                .padding(start = 12.dp, end = 6.dp, top = 9.dp, bottom = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Title, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.widthIn(min = 92.dp))
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = colors.onSurfaceVariant)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val entries = listOf(
+                Triple("Texto", BlockType.NORMAL, 16),
+                Triple("Título grande", BlockType.H1, 26),
+                Triple("Título", BlockType.H2, 22),
+                Triple("Subtítulo", BlockType.H3, 18),
+            )
+            for ((name, block, size) in entries) {
+                val selected = if (block == BlockType.NORMAL) !current.isHeading else block == current
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            name,
+                            fontSize = size.sp,
+                            fontWeight = if (block == BlockType.NORMAL) FontWeight.Normal else FontWeight.Bold,
+                        )
+                    },
+                    trailingIcon = { if (selected) Icon(Icons.Filled.Check, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        when {
+                            block == BlockType.NORMAL -> if (current.isHeading) onPick(current)
+                            block != current -> onPick(block)
+                        }
+                    },
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -152,7 +220,7 @@ fun ToolButton(
     }
     Box(
         Modifier
-            .size(44.dp)
+            .size(40.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(if (active) colors.primaryContainer else Color.Transparent)
             .semantics { contentDescription = description }
@@ -203,30 +271,6 @@ private fun SizeButton(current: Int, onPick: (Int?) -> Unit) {
                     text = { Text(label + if (pct == current) "  ✓" else "") },
                     onClick = { onPick(pct); open = false },
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun HeadingButton(current: BlockType, onPick: (BlockType) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        ToolButton(Icons.Filled.Title, "Títulos", active = current.isHeading) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            val entries = listOf(
-                "Título grande" to BlockType.H1,
-                "Título" to BlockType.H2,
-                "Subtítulo" to BlockType.H3,
-            )
-            for ((label, block) in entries) {
-                DropdownMenuItem(
-                    text = { Text(label + if (block == current) "  ✓" else "") },
-                    onClick = { onPick(block); open = false },
-                )
-            }
-            if (current.isHeading) {
-                DropdownMenuItem(text = { Text("Texto normal") }, onClick = { onPick(current); open = false })
             }
         }
     }

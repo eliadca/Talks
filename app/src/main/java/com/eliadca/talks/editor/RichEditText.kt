@@ -1,6 +1,7 @@
 package com.eliadca.talks.editor
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Typeface
 import android.os.SystemClock
 import android.text.Editable
@@ -151,6 +152,17 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
         invalidate()
     }
 
+    override fun onDraw(canvas: Canvas) {
+        // Notes for the speaker get a soft rounded background, under the text.
+        layout?.let { l ->
+            canvas.save()
+            canvas.translate(totalPaddingLeft.toFloat(), totalPaddingTop.toFloat())
+            NoteDecor.draw(canvas, l, text, style)
+            canvas.restore()
+        }
+        super.onDraw(canvas)
+    }
+
     /** Moves the cursor to [offset] (a document offset) and scrolls it into view. */
     fun goTo(offset: Int) {
         setSelection(offset.coerceIn(0, contentLength))
@@ -278,6 +290,20 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     fun insertAtCursor(s: String) {
         val (a, b) = selection()
         text.replace(a, b, s)
+    }
+
+    /**
+     * A note for the speaker: the selection becomes one, or, with nothing selected, "[]" is
+     * inserted with the cursor inside, ready to type the note.
+     */
+    fun insertNote() {
+        val (a, b) = selection()
+        if (b > a) {
+            toggleInline(InlineKind.STAGE)
+            return
+        }
+        text.replace(a, b, "[]")
+        setSelection(a + 1)
     }
 
     fun selectAllContent() = setSelection(0, contentLength)
