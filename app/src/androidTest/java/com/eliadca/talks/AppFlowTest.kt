@@ -3,6 +3,7 @@ package com.eliadca.talks
 import android.Manifest
 import android.app.UiAutomation
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -66,6 +67,14 @@ class AppFlowTest {
         override fun failed(e: Throwable, description: Description) {
             Log.i("TALKS_TEST", "FAILED ${description.methodName}: ${e.message?.lineSequence()?.take(6)?.joinToString(" | ")}")
             e.stackTrace.filter { it.className.startsWith("com.eliadca.talks") }.take(4).forEach { Log.i("TALKS_TEST", "  at $it") }
+            logFocus("failure")
+            try {
+                val a = compose.activity
+                Log.i("TALKS_TEST", "activity state=${a.lifecycle.currentState} finishing=${a.isFinishing} hasFocus=${a.hasWindowFocus()}")
+            } catch (t: Throwable) { Log.i("TALKS_TEST", "activity unavailable: ${t.message?.take(200)}") }
+            shell("logcat -d -t 600").lineSequence()
+                .filter { Regex("ANR in|isn't responding|FATAL EXCEPTION|has died|am_crash|am_anr|Force finishing").containsMatchIn(it) }
+                .take(12).forEach { Log.i("TALKS_TEST", "sys: ${it.take(260)}") }
             try { compose.onRoot().printToLog("TALKS_TREE_FAIL") } catch (t: Throwable) { Log.i("TALKS_TEST", "no tree: ${t.message?.take(200)}") }
             try { Ascii.shot("failure") } catch (_: Throwable) {}
         }
@@ -87,11 +96,16 @@ class AppFlowTest {
     }
 
     @Before
-    fun prepare() = runBlocking(Dispatchers.IO) {
-        // Wait for the first-launch sample content, then start from an empty library.
-        withTimeout(20_000) { while (!container.settings.settings.first().seeded) delay(100) }
-        container.database.clearAllTables()
-        container.settings.update { AppSettings(seeded = true, engine = EngineKind.ANDROID) }
+    fun prepare() {
+        runBlocking(Dispatchers.IO) {
+            // Wait for the first-launch sample content, then start from an empty library.
+            withTimeout(20_000) { while (!container.settings.settings.first().seeded) delay(100) }
+            container.database.clearAllTables()
+            container.settings.update { AppSettings(seeded = true, engine = EngineKind.ANDROID) }
+        }
+        val focused = runCatching { compose.waitUntil(20_000) { compose.activity.hasWindowFocus() }; true }.getOrDefault(false)
+        Log.i("TALKS_TEST", "start of test: window focus=$focused")
+        if (!focused) logFocus("before")
     }
 
     @After
@@ -106,6 +120,33 @@ class AppFlowTest {
         } catch (e: ComposeTimeoutException) {
             throw AssertionError("text '$text' did not appear within ${timeoutMs}ms")
         }
+    }
+
+    private fun shell(cmd: String): String = try {
+        val fd = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(cmd)
+        ParcelFileDescriptor.AutoCloseInputStream(fd).bufferedReader().use { it.readText() }
+    } catch (t: Throwable) {
+        "shell failed: ${t.message}"
+    }
+
+    /** Which window the system thinks has the focus; an ANR or system dialog on top breaks Espresso. */
+    private fun logFocus(tag: String) {
+        shell("dumpsys window").lineSequence()
+            .filter { it.contains("mCurrentFocus") || it.contains("mFocusedApp") }
+            .map { it.trim().take(200) }.distinct().take(3)
+            .forEach { Log.i("TALKS_TEST", "[$tag] $it") }
+    }
+
+    /** The emulator tablet is landscape by nature; rotating by 90 degrees would make it portrait. */
+    private fun forceLandscape(): Boolean {
+        val ua = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val metrics = { compose.activity.resources.displayMetrics }
+        for (rotation in intArrayOf(UiAutomation.ROTATION_FREEZE_0, UiAutomation.ROTATION_FREEZE_90)) {
+            ua.setRotation(rotation)
+            val ok = runCatching { compose.waitUntil(6_000) { metrics().widthPixels > metrics().heightPixels }; true }.getOrDefault(false)
+            if (ok) return true
+        }
+        return false
     }
 
     private fun assertShown(text: String) {
@@ -163,15 +204,12 @@ class AppFlowTest {
     @Test
     fun tabletLandscapeShowsFoldersListAndEditorSideBySide() {
         runBlocking { container.speeches.create("Charla A", Markup.parse("Texto de A")) }
-        val rotated = InstrumentationRegistry.getInstrumentation().uiAutomation.setRotation(UiAutomation.ROTATION_FREEZE_90)
         waitForText("Charla A")
-        val metrics = { compose.activity.resources.displayMetrics }
-        val landscape = runCatching {
-            compose.waitUntil(10_000) { metrics().widthPixels > metrics().heightPixels }
-            true
-        }.getOrDefault(false)
+        val landscape = forceLandscape()
+        val metrics = compose.activity.resources.displayMetrics
         compose.waitForIdle()
-        Log.i("TALKS_TEST", "rotation requested=$rotated landscape=$landscape size=${metrics().widthPixels}x${metrics().heightPixels} density=${metrics().density}")
+        Log.i("TALKS_TEST", "landscape=$landscape size=${metrics.widthPixels}x${metrics.heightPixels} density=${metrics.density}")
+        assertTrue("the tablet must be in landscape", landscape)
         compose.onRoot().printToLog("TALKS_TREE_TABLET")
         Ascii.shot("tablet-landscape")
         // Sidebar, list and (empty) editor are all visible at once.

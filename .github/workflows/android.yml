@@ -100,9 +100,11 @@ jobs:
           grep -E "^e: |FAILED|AssertionError|Tests? .*(passed|failed)|BUILD (SUCCESSFUL|FAILED)|Exception" gradle-ui.log | head -60 || true
           echo "=== UI TREE / DIAGNOSTICS ==="
           grep -E "TALKS_TEST|AndroidRuntime" ui-log.txt | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ //' | head -60 || true
+          echo "--- system ---"
+          cat ui-system.txt 2>/dev/null | cut -c1-260 | head -30 || true
           for tag in TALKS_TREE_FAIL TALKS_TREE_TABLET; do
             echo "--- $tag ---"
-            grep -F "$tag" ui-log.txt | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ D //' | head -90 || true
+            grep -F "$tag" ui-log.txt | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ D //' | head -70 || true
           done
           echo "=== SCREENSHOTS ($SHOW_LABELS) ==="
           for label in ${SHOW_LABELS//,/ }; do
@@ -117,6 +119,7 @@ jobs:
           name: ui-logs
           path: |
             ui-log.txt
+            ui-system.txt
             gradle-ui.log
             app/build/reports/androidTests/**
           if-no-files-found: ignore
