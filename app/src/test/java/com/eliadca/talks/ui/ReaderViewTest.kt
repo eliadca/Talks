@@ -56,6 +56,23 @@ class ReaderViewTest {
         r.draw(Canvas(bmp))
     }
 
+    @Test fun progressReportedFromABackgroundThreadDoesNotCrash() {
+        val r = reader()
+        val offset = SampleContent.practice.text.indexOf("Hace algunos años")
+        var failure: Throwable? = null
+        val worker = Thread {
+            try {
+                r.resumeFollow()
+                r.setProgress(offset, offset, offset + 40)
+            } catch (t: Throwable) {
+                failure = t
+            }
+        }
+        worker.start()
+        worker.join()
+        assertEquals(null, failure)
+    }
+
     @Test fun theStartOfTheSpeechNeedsNoScroll() {
         val r = reader()
         r.setProgress(0, 0, 20, jump = true)

@@ -122,6 +122,11 @@ class ReaderView(context: Context) : ScrollView(context) {
 
     /** Updates what is dimmed and highlighted and, if following, scrolls to keep up. */
     fun setProgress(spokenEnd: Int, nextStart: Int, nextEnd: Int, jump: Boolean = false) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            // Callers may collect the session state on a background thread; views and animators need the main one.
+            post { setProgress(spokenEnd, nextStart, nextEnd, jump) }
+            return
+        }
         this.spokenEnd = spokenEnd
         this.nextStart = nextStart
         this.nextEnd = nextEnd
@@ -131,6 +136,10 @@ class ReaderView(context: Context) : ScrollView(context) {
 
     /** Resumes following the speaker and brings the current line back to its place. */
     fun resumeFollow(animated: Boolean = true) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            post { resumeFollow(animated) }
+            return
+        }
         handler.removeCallbacks(resumeFollowing)
         val was = autoFollow
         autoFollow = true
