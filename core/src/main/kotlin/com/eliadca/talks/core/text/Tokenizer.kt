@@ -52,18 +52,8 @@ object Tokenizer {
      * skipped (stage directions, headings the speaker does not read aloud).
      */
     fun script(text: String, silent: List<IntRange> = emptyList()): List<ScriptToken> {
-        val sortedSilent = silent.sortedBy { it.first }
-        var silentIdx = 0
-        fun isSilent(pos: Int): Boolean {
-            while (silentIdx < sortedSilent.size && sortedSilent[silentIdx].last < pos) silentIdx++
-            // Ranges may overlap, so scan from the first candidate.
-            var k = silentIdx
-            while (k < sortedSilent.size && sortedSilent[k].first <= pos) {
-                if (pos in sortedSilent[k]) return true
-                k++
-            }
-            return false
-        }
+        val quiet = SilentRanges(silent)
+        fun isSilent(pos: Int): Boolean = quiet.endIfInside(pos) > pos
 
         val tokens = ArrayList<ScriptToken>(text.length / 5 + 4)
         var paragraph = 0
@@ -76,7 +66,7 @@ object Tokenizer {
                 c.isDigit() -> {
                     val parsed = parseNumber(text, i)
                     if (!isSilent(i)) {
-                        val b = boundaryAfter(text, parsed.end)
+                        val b = boundaryAfter(text, parsed.end, quiet)
                         emitWords(tokens, parsed.words, i, parsed.end, b, paragraph)
                     }
                     i = parsed.end
@@ -86,7 +76,7 @@ object Tokenizer {
                     while (j < n && (text[j].isLetter() || (text[j] == '\'' && j + 1 < n && text[j + 1].isLetter()))) j++
                     if (!isSilent(i)) {
                         val word = text.substring(i, j).replace("'", "")
-                        val b = boundaryAfter(text, j)
+                        val b = boundaryAfter(text, j, quiet)
                         emitWords(tokens, listOf(SpanishText.canonical(word)), i, j, b, paragraph)
                     }
                     i = j
@@ -271,11 +261,60 @@ object Tokenizer {
         return true
     }
 
-    private fun boundaryAfter(text: String, from: Int): Int {
+    /**
+     * Sorted, merged ranges of text that is not spoken, looked up without state (so looking ahead
+     * from one word never disturbs the lookup for the next one).
+     */
+    private class SilentRanges(ranges: List<IntRange>) {
+        private val starts: IntArray
+        private val ends: IntArray // exclusive
+
+        init {
+            val sorted = ranges.filter { !it.isEmpty() }.sortedBy { it.first }
+            val s = ArrayList<Int>()
+            val e = ArrayList<Int>()
+            for (r in sorted) {
+                if (e.isNotEmpty() && r.first <= e.last()) {
+                    if (r.last + 1 > e.last()) e[e.lastIndex] = r.last + 1
+                } else {
+                    s += r.first
+                    e += r.last + 1
+                }
+            }
+            starts = s.toIntArray()
+            ends = e.toIntArray()
+        }
+
+        /** The (exclusive) end of the silent range that contains [pos], or -1. */
+        fun endIfInside(pos: Int): Int {
+            var lo = 0
+            var hi = starts.size
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (starts[mid] <= pos) lo = mid + 1 else hi = mid
+            }
+            val k = lo - 1
+            return if (k >= 0 && pos < ends[k]) ends[k] else -1
+        }
+    }
+
+    /**
+     * What follows the word that ends at [from]. A note for the speaker (any [silent] text) is a
+     * pause, at least a clause boundary; one that spans a line break ends the paragraph.
+     */
+    private fun boundaryAfter(text: String, from: Int, silent: SilentRanges): Int {
         var i = from
         val n = text.length
         var result = Boundary.NONE
         while (i < n) {
+            val skipTo = silent.endIfInside(i)
+            if (skipTo > i) {
+                val nl = text.indexOf('\n', i)
+                if (nl in i until skipTo) return Boundary.PARAGRAPH
+                result = maxOf(result, Boundary.CLAUSE)
+                i = skipTo
+                continue
+            }
             val c = text[i]
             when {
                 c == '\n' -> return Boundary.PARAGRAPH

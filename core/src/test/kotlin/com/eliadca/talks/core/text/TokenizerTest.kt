@@ -34,6 +34,25 @@ class TokenizerTest {
         assertEquals(listOf("un", "tres"), norms("uno [dos\ntres"))
     }
 
+    private fun boundaries(text: String, silent: List<IntRange> = emptyList()) =
+        Tokenizer.script(text, Tokenizer.bracketRanges(text) + silent).associate { it.norm to it.boundary }
+
+    @Test fun aNoteIsAPause() {
+        // A note before the full stop no longer hides it.
+        assertEquals(Boundary.SENTENCE, boundaries("Una palabra [pausa]. Siguiente")["palabra"])
+        // A note at the end of a line ends the paragraph.
+        assertEquals(Boundary.PARAGRAPH, boundaries("Un momento. [Esperar.]\nLos")["momento"])
+        // A note in the middle of a sentence is a pause like a comma.
+        val mid = Tokenizer.script("Es pequeño [sonreír] es enorme", Tokenizer.bracketRanges("Es pequeño [sonreír] es enorme"))
+        assertEquals(Boundary.CLAUSE, mid[1].boundary)
+        // A silent stretch that spans a line break ends the paragraph too.
+        val text = "Uno dos tres cuatro"
+        assertEquals(Boundary.PARAGRAPH, Tokenizer.script("Uno dos\ntres cuatro", listOf(3 until 10)).first().boundary)
+        assertEquals(Boundary.NONE, Tokenizer.script(text).first().boundary)
+        // The words of the note are still left out.
+        assertEquals(4, mid.size)
+    }
+
     @Test fun silentRangesAreSkipped() {
         val text = "Título\nPrimera frase"
         assertEquals(listOf("primer", "frase"), norms(text, listOf(0 until 6)))

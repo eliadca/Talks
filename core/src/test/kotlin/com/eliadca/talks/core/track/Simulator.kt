@@ -1,6 +1,7 @@
 package com.eliadca.talks.core.track
 
 import com.eliadca.talks.core.text.Boundary
+import com.eliadca.talks.core.text.SpanishText
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -29,6 +30,11 @@ class SimConfig(
     val offTopicCorpus: List<String> = emptyList(),
     /** Chance that, after going off topic, the speaker comes back at the next sentence instead of where they left. */
     val offTopicResumeNext: Double = 0.3,
+    /** Chance of a stray word (a filler, breath read as "y"...) between two sentences, before the next one starts. */
+    val sentenceEndFiller: Double = 0.0,
+    val sentenceEndFillers: List<String> = listOf("eh", "este", "pues", "y", "a", "bueno", "entonces"),
+    /** Chance that the recogniser ends its session at the end of a sentence (the speaker pauses there). */
+    val breakAtSentenceEnd: Double = 0.0,
 )
 
 class SimEvent(
@@ -108,6 +114,12 @@ object Simulator {
         }
 
         while (pos < n) {
+            // Random draws only for knobs that are on, so existing seeded runs stay the same.
+            if (sentenceStart(pos) && pos > 0 && cfg.sentenceEndFiller > 0 && rng.nextDouble() < cfg.sentenceEndFiller) {
+                // A filler that is the sentence's own first word would just be reading it.
+                val choices = cfg.sentenceEndFillers.filter { SpanishText.canonical(it) != tokens[pos].norm }
+                if (choices.isNotEmpty()) spoken += Spoken(choices.random(rng), pos, false)
+            }
             if (sentenceStart(pos) && pos > 0 && cfg.offTopicCorpus.isNotEmpty() && rng.nextDouble() < cfg.offTopicPerSentence) {
                 // A long stretch about something else entirely, taken as running text from the corpus.
                 val k = rng.nextInt(cfg.offTopicMin, cfg.offTopicMax + 1)
@@ -197,7 +209,17 @@ object Simulator {
         var i = 0
         while (i < spoken.size) {
             val len = rng.nextInt(cfg.sessionMin, cfg.sessionMax + 1)
-            val end = min(spoken.size, i + len)
+            var end = min(spoken.size, i + len)
+            if (cfg.breakAtSentenceEnd > 0) {
+                // The speaker pauses at the end of a sentence and the recogniser starts a new session.
+                for (k in i until end - 1) {
+                    val t = spoken[k].truthAfter
+                    if (t < n && t > 0 && sentenceStart(t) && spoken[k + 1].truthAfter >= t && rng.nextDouble() < cfg.breakAtSentenceEnd) {
+                        end = k + 1
+                        break
+                    }
+                }
+            }
             for (k in (if (cfg.emitPartials) i until end else IntRange.EMPTY)) {
                 val words = ArrayList<String>()
                 for (m in i..k) words += spoken[m].word
@@ -265,4 +287,44 @@ fun score(index: ScriptIndex, run: SimRun, config: TrackerConfig = TrackerConfig
     }
     val recoveries = recovered.values.toList()
     return SimScore(graded, within, recoveries, run.jumps.size - recoveries.size, kotlin.math.abs(lastPos - lastTruth), digressionEvents, digressionAnchored)
+}
+
+/** How often the marker went past the first word of a sentence before the speaker said it. */
+class StartScore(val starts: Int, val skipped: Int, val aheadEvents: Int, val events: Int) {
+    val skippedShare get() = if (starts == 0) 0.0 else skipped.toDouble() / starts
+    override fun toString() = "sentence starts=%d skipped=%d (%.4f) ahead events=%d/%d".format(starts, skipped, skippedShare, aheadEvents, events)
+}
+
+/**
+ * Scores the moments when the speaker has finished a sentence (and maybe said a stray word) but not
+ * yet the first word of the next one: the marker must not already be past that word.
+ */
+fun scoreSentenceStarts(index: ScriptIndex, run: SimRun, config: TrackerConfig = TrackerConfig()): StartScore {
+    val tracker = SpeechTracker(index, config)
+    val tokens = index.tokens
+    fun isStart(p: Int) = p in 1 until index.size && tokens[p - 1].boundary >= com.eliadca.talks.core.text.Boundary.SENTENCE
+    var starts = 0
+    var skipped = 0
+    var ahead = 0
+    var events = 0
+    var current = -1
+    var currentSkipped = false
+    for (e in run.events) {
+        val st = tracker.onHypothesis(e.text, e.isFinal)
+        if (isStart(e.truth)) {
+            if (e.truth != current) {
+                if (currentSkipped) skipped++
+                current = e.truth
+                currentSkipped = false
+                starts++
+            }
+            events++
+            if (st.position > e.truth) {
+                ahead++
+                currentSkipped = true
+            }
+        }
+    }
+    if (currentSkipped) skipped++
+    return StartScore(starts, skipped, ahead, events)
 }

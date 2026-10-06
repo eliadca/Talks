@@ -132,4 +132,85 @@ class SpeechTrackerTest {
         t.reset(0)
         assertEquals(0, t.state.position)
     }
+
+    // --- line starts --------------------------------------------------------------------------
+
+    private enum class Where { SAME_PARTIAL, SAME_FINAL, NEW_SESSION }
+
+    /** Reads the sentence [from, until) of [ix] as growing partials, then a stray word, as [where] says. */
+    private fun readThenStray(ix: ScriptIndex, from: Int, until: Int, stray: String, where: Where): SpeechTracker {
+        val t = SpeechTracker(ix)
+        t.reset(from)
+        val words = ix.tokens.subList(from, until).map { it.norm }
+        for (k in 1..words.size) t.onHypothesis(words.take(k).joinToString(" "), isFinal = false)
+        val said = words.joinToString(" ")
+        when (where) {
+            Where.SAME_PARTIAL -> t.onHypothesis("$said $stray", isFinal = false)
+            Where.SAME_FINAL -> t.onHypothesis("$said $stray", isFinal = true)
+            Where.NEW_SESSION -> {
+                t.onHypothesis(said, isFinal = true)
+                t.onHypothesis(stray, isFinal = false)
+            }
+        }
+        return t
+    }
+
+    @Test fun aStrayWordAtTheEndOfASentenceNeverSkipsTheFirstWordOfTheNext() {
+        val ix = SampleScripts.practice
+        val starts = (1 until ix.size).filter { ix.tokens[it - 1].boundary >= com.eliadca.talks.core.text.Boundary.SENTENCE }
+        val strays = listOf("y", "a", "eh", "este", "pues", "bueno", "entonces")
+        val failures = ArrayList<String>()
+        var cases = 0
+        var prev = 0
+        for (s in starts) {
+            for (stray in strays) {
+                if (com.eliadca.talks.core.text.SpanishText.canonical(stray) == ix.tokens[s].norm) continue // that is just reading
+                for (where in Where.entries) {
+                    cases++
+                    val t = readThenStray(ix, prev, s, stray, where)
+                    if (t.state.position > s) failures += "'$stray' ($where) before «${ix.tokens[s].norm}» at $s -> ${t.state.position}"
+                }
+            }
+            prev = s
+        }
+        assertTrue("${failures.size}/$cases skipped:\n" + failures.take(15).joinToString("\n"), failures.isEmpty())
+    }
+
+    @Test fun theFirstWordOfTheNextSentenceStillMovesTheMarkerAfterAStrayWord() {
+        val ix = SampleScripts.practice
+        val s = (1 until ix.size).first { it > 20 && ix.tokens[it - 1].boundary >= com.eliadca.talks.core.text.Boundary.SENTENCE }
+        val prev = (1 until s).last { ix.tokens[it - 1].boundary >= com.eliadca.talks.core.text.Boundary.SENTENCE }
+        val t = readThenStray(ix, prev, s, "y", Where.SAME_PARTIAL)
+        assertEquals(s, t.state.position)
+        val said = ix.tokens.subList(prev, s).joinToString(" ") { it.norm }
+        t.onHypothesis("$said y ${ix.tokens[s].norm} ${ix.tokens[s + 1].norm}", isFinal = false)
+        assertEquals(s + 2, t.state.position)
+    }
+
+    @Test fun twoStrayWordsAndARevisedPartialStayPut() {
+        val t = SpeechTracker(index)
+        t.onHypothesis("buenos dias a todos eh y", isFinal = false)
+        assertEquals(4, t.state.position)
+        val u = SpeechTracker(index)
+        u.onHypothesis("buenos dias a todos y", isFinal = false)
+        u.onHypothesis("buenos dias a todos", isFinal = true)
+        assertEquals(4, u.state.position)
+        u.onHypothesis("gracias por estar", isFinal = true)
+        assertEquals(7, u.state.position)
+    }
+
+    @Test fun aHeadingReadAloudDoesNotSkipTheFirstWordAfterIt() {
+        val text = "Gracias por venir esta noche.\nPrimera idea: el valor del primer paso\nHace algunos años conocí a Marta."
+        val heading = text.indexOf("Primera") until text.indexOf("\nHace")
+        val ix = ScriptIndex.build(text, listOf(heading))
+        val hace = ix.tokens.indexOfFirst { it.norm == "hace" }
+        val t = SpeechTracker(ix)
+        t.onHypothesis("gracias por venir esta noche", isFinal = true)
+        assertEquals(hace, t.state.position)
+        t.onHypothesis("primera idea el valor del primer paso", isFinal = false)
+        assertTrue("moved to ${t.state.position}", t.state.position <= hace)
+        // Coming back to the text after words that are not in it takes a real phrase of it.
+        t.onHypothesis("primera idea el valor del primer paso hace algunos años", isFinal = false)
+        assertEquals(hace + 3, t.state.position)
+    }
 }

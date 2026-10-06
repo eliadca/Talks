@@ -28,6 +28,31 @@ class TrackerSimulationTest {
 
     private fun accuracy(s: List<SimScore>) = s.sumOf { it.within }.toDouble() / s.sumOf { it.graded }
 
+    private val lineEnds = SimConfig(sentenceEndFiller = 0.5, breakAtSentenceEnd = 0.6)
+
+    private fun startsMany(index: ScriptIndex, cfg: SimConfig, tracker: TrackerConfig = TrackerConfig(), seeds: Int = 15): StartScore {
+        val all = (1..seeds).map { seed -> scoreSentenceStarts(index, Simulator.generate(index, cfg, Random(seed * 7919L)), tracker) }
+        return StartScore(all.sumOf { it.starts }, all.sumOf { it.skipped }, all.sumOf { it.aheadEvents }, all.sumOf { it.events })
+    }
+
+    @Test fun sentenceStartsAreNotSkipped() {
+        // Stray words between sentences (fillers, a breath heard as "y") and recogniser sessions
+        // that end at the pause: the marker must not pass the next sentence's first word early.
+        val now = startsMany(SampleScripts.practice, lineEnds)
+        val noisy = startsMany(SampleScripts.practice, SimConfig(substitution = 0.12, drop = 0.06, sentenceEndFiller = 0.5, breakAtSentenceEnd = 0.6))
+        val legacy = startsMany(SampleScripts.practice, lineEnds, TrackerConfig(exactLanding = false, bridgeBits = 0.0, dropHesitations = false))
+        println("line starts (practice)             $now")
+        println("line starts, noisy (practice)      $noisy")
+        println("line starts, without the fix       $legacy")
+        assertTrue("first words skipped: $now", now.skippedShare <= 0.01)
+        assertTrue("first words skipped: $noisy", noisy.skippedShare <= 0.015)
+        // The simulation reproduces the problem the rules fix.
+        assertTrue("simulation lost its teeth: $legacy", legacy.skippedShare >= 0.10)
+        val acc = accuracy(runMany(SampleScripts.practice, lineEnds))
+        println("line starts accuracy               %.4f".format(acc))
+        assertTrue("accuracy $acc", acc > 0.97)
+    }
+
     @Test fun perfectRecognitionFollowsExactly() {
         val s = runMany(SampleScripts.practice, SimConfig(substitution = 0.0, drop = 0.0, filler = 0.0, gapMax = 0, truncatePartial = 0.0))
         report("perfect", s)

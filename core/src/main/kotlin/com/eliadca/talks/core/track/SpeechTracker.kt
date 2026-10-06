@@ -51,6 +51,19 @@ data class TrackerConfig(
     val maxScriptGap: Int = 4,
     /** After this many heard words that do not read as the script at the marker, the speaker is improvising. */
     val offScriptWords: Int = 3,
+    /**
+     * The marker lands right after the last word actually heard as the script, so a word is never
+     * shown as said before it (or a later word) was heard: a stray "eh" or "y" at the end of a line
+     * does not push the marker past the first word of the next one.
+     */
+    val exactLanding: Boolean = true,
+    /**
+     * When the words heard skip script words at or after the marker, what follows the skip must carry
+     * at least this much information: one little word such as "y" or "a" cannot carry a skip.
+     */
+    val bridgeBits: Double = 9.5,
+    /** Pure hesitations ("eh", "mmm") say nothing about the place and are left out. */
+    val dropHesitations: Boolean = true,
 )
 
 enum class TrackStatus {
@@ -194,6 +207,21 @@ class SpeechTracker(
     private var pendingCount = 0
     private var backCount = 0
 
+    /** Heard words of finished recogniser sessions, counted since the start: heard words get absolute numbers. */
+    private var committedWords = 0
+
+    /** Absolute number of each word of the latest [recentWords] list. */
+    private var recentAbs = IntArray(0)
+
+    /**
+     * Heard words numbered below this already took the marker to where it is; with exact landing they
+     * may not be counted again to move it further (a repeated phrase must not be read twice).
+     */
+    private var usedHeard = 0
+
+    /** Absolute number of the last heard word of the chain found by the latest [landing]. */
+    private var landingHeard = -1
+
     /** Words heard since the speech last read as the script at the marker. */
     private var unsupportedWords = 0
     private var offScript = false
@@ -224,6 +252,8 @@ class SpeechTracker(
         pendingPos = -1; pendingCount = 0; backCount = 0
         history.clear()
         unsupportedWords = 0; offScript = false
+        committedWords = 0
+        usedHeard = 0
     }
 
     /**
@@ -243,6 +273,7 @@ class SpeechTracker(
         // Words heard before the move belong to the old place.
         history.clear()
         unsupportedWords = 0; offScript = false
+        usedHeard = committedWords
     }
 
     /**
@@ -251,6 +282,7 @@ class SpeechTracker(
      */
     fun onHypothesis(text: String, isFinal: Boolean): TrackerState {
         var words = Tokenizer.heard(text)
+        if (config.dropHesitations) words = words.filter { it.norm !in HESITATIONS || index.hasWord(it.norm) }
 
         if (stale.isNotEmpty()) {
             if (startsWithMostly(words, stale)) {
@@ -302,6 +334,7 @@ class SpeechTracker(
             committed.copyFrom(result)
             segmentOpen = false
         }
+        committedWords += lastWords.size
         for (w in lastWords) {
             history.addLast(w)
             if (history.size > HISTORY) history.removeFirst()
@@ -332,8 +365,16 @@ class SpeechTracker(
         val fromCurrent = min(current.size, HISTORY)
         val fromHistory = min(history.size, HISTORY - fromCurrent)
         val out = ArrayList<HeardWord>(fromHistory + fromCurrent)
-        for (k in history.size - fromHistory until history.size) out += history[k]
-        for (k in current.size - fromCurrent until current.size) out += current[k]
+        val abs = IntArray(fromHistory + fromCurrent)
+        for (k in history.size - fromHistory until history.size) {
+            abs[out.size] = committedWords - (history.size - k)
+            out += history[k]
+        }
+        for (k in current.size - fromCurrent until current.size) {
+            abs[out.size] = committedWords + k
+            out += current[k]
+        }
+        recentAbs = abs
         return out
     }
 
@@ -531,7 +572,7 @@ class SpeechTracker(
     // --- evidence -----------------------------------------------------------------------------
 
     /** How strongly the latest heard words read as the script text that ends just before a place. */
-    private class Support(val bits: Double, val matches: Int, val content: Int) {
+    private class Support(val bits: Double, val matches: Int, val content: Int, val lastHeard: Int = -1) {
         fun atLeast(minBits: Double, minMatches: Int, minContent: Int = 0) =
             bits >= minBits && matches >= minMatches && content >= minContent
     }
@@ -547,7 +588,13 @@ class SpeechTracker(
      * is reading produces long chains of many bits; chance matches in unrelated speech produce
      * short chains of common words.
      */
-    private fun support(recent: List<HeardWord>, prefixLast: Boolean, pos: Int): Support {
+    private fun support(
+        recent: List<HeardWord>,
+        prefixLast: Boolean,
+        pos: Int,
+        from: Int = Int.MAX_VALUE,
+        exactEnd: Boolean = false,
+    ): Support {
         val m = recent.size
         if (m == 0 || pos <= 0 || n == 0) return NO_SUPPORT
         val end = min(pos, n)
@@ -556,25 +603,40 @@ class SpeechTracker(
         val score = DoubleArray(m * w)
         val count = IntArray(m * w)
         val content = IntArray(m * w)
+        // Information matched since the chain skipped words right at [from] (the marker).
+        val bridge = DoubleArray(m * w)
+        val minBridge = if (from == Int.MAX_VALUE) Double.NEGATIVE_INFINITY else config.bridgeBits
+        // With [exactEnd] the chain must reach the word right before [pos] (the end of the speech may
+        // still be one word short, so that a lost last word does not hold the end back), and it must
+        // be made of the latest words heard: at most one stray word may follow it.
+        val maxTailScript = if (!exactEnd) MAX_TAIL else if (pos >= n) 1 else 0
+        val maxTailHeard = if (exactEnd) 1 else MAX_TAIL
         var bestBits = 0.0
         var bestCount = 0
         var bestContent = 0
+        var bestHeard = -1
+        // Words that already brought the marker here cannot also take it further.
+        val fresh = exactEnd && from != Int.MAX_VALUE && recentAbs.size == m
         for (i in 0 until m) {
             val word = recent[i]
             val sim = similarity(word, prefixLast && i == m - 1)
             val bits = info(word.norm)
             val isContent = if (bits >= CONTENT_BITS) 1 else 0
+            val used = fresh && recentAbs[i] < usedHeard
             for (j in 0 until w) {
                 val k = i * w + j
                 val sv = sim[index.tokenVocab[j0 + j]].toDouble()
-                if (sv < MIN_MATCH) {
+                if (sv < MIN_MATCH || (used && j0 + j >= from)) {
                     score[k] = -1.0
                     continue
                 }
                 val gain = bits * sv
+                val q = j0 + j
                 var sc = gain
                 var c = 1
                 var ct = isContent
+                // A chain that starts past the marker has skipped the words in between.
+                var br = if (q > from) gain else Double.POSITIVE_INFINITY
                 // Extend a chain that ended a little earlier on both sides. Gaps are kept short:
                 // a reader may add a word or lose a couple, but a chain must not bridge a stretch
                 // of unrelated speech or a skipped passage.
@@ -589,25 +651,30 @@ class SpeechTracker(
                             sc = cand
                             c = count[row + j2] + 1
                             ct = content[row + j2] + isContent
+                            // Skipping words right at the marker (its word or the next) starts a new bridge.
+                            br = if (j - j2 > 1 && j0 + j2 + 1 <= from + 1 && q - 1 >= from) gain else bridge[row + j2] + gain
                         }
                     }
                 }
                 score[k] = sc
                 count[k] = c
                 content[k] = ct
+                bridge[k] = br
                 val tailHeard = m - 1 - i
-                val tailScript = end - 1 - (j0 + j)
-                if (tailHeard <= MAX_TAIL && tailScript <= MAX_TAIL) {
+                val tailScript = end - 1 - q
+                if (tailHeard <= maxTailHeard && tailScript <= maxTailScript && br >= minBridge) {
                     val total = sc - HEARD_GAP * tailHeard - SCRIPT_GAP * tailScript
                     if (total > bestBits) {
                         bestBits = total
                         bestCount = c
                         bestContent = ct
+                        bestHeard = i
                     }
                 }
             }
         }
-        return if (bestCount == 0) NO_SUPPORT else Support(bestBits, bestCount, bestContent)
+        val lastHeard = if (bestHeard >= 0 && bestHeard < recentAbs.size) recentAbs[bestHeard] else -1
+        return if (bestCount == 0) NO_SUPPORT else Support(bestBits, bestCount, bestContent, lastHeard)
     }
 
     // --- output filter ----------------------------------------------------------------------
@@ -639,9 +706,13 @@ class SpeechTracker(
             delta in 1..stepLimit -> {
                 // Coming back from an improvisation needs a real phrase of the script; while
                 // reading, the words just heard only have to continue the text.
-                val ok = if (offScript) atBest.atLeast(config.reentryBits, 3, 1) else atBest.atLeast(config.stepBits, 2)
-                if (ok) {
-                    accept(best)
+                val to = if (offScript) {
+                    landing(best, displayPos + 1, recent, prefixLast, config.reentryBits, 3, 1)
+                } else {
+                    landing(best, displayPos + 1, recent, prefixLast, config.stepBits, 2, 0)
+                }
+                if (to > displayPos) {
+                    accept(to)
                     moved = true
                 }
             }
@@ -661,15 +732,17 @@ class SpeechTracker(
                 val needBits = if (far) config.jumpBits else config.moveBits
                 val needMatches = if (far) 4 else 3
                 if (confidence >= config.jumpConfidence && atBest.atLeast(needBits, needMatches, 1)) {
-                    if (atBest.atLeast(needBits + SURE_EXTRA_BITS, needMatches + 1, 1)) {
-                        accept(best)
-                        moved = true
-                    } else {
+                    val sure = atBest.atLeast(needBits + SURE_EXTRA_BITS, needMatches + 1, 1)
+                    if (!sure) {
                         if (pendingPos >= 0 && abs(pendingPos - best) <= 6) pendingCount++ else {
                             pendingPos = best; pendingCount = 1
                         }
-                        if (pendingCount >= config.jumpConfirmations) {
-                            accept(best)
+                    }
+                    if (sure || pendingCount >= config.jumpConfirmations) {
+                        // Land right after the words heard there, never on a word not said yet.
+                        val to = landing(best, maxOf(0, best - 2), recent, prefixLast, needBits, needMatches, 1)
+                        if (to >= 0 && to != displayPos) {
+                            accept(to)
                             moved = true
                         }
                     }
@@ -680,7 +753,7 @@ class SpeechTracker(
         }
 
         // Is the speaker reading the text at the marker right now?
-        val here = if (moved || best == displayPos) atBest else support(recent, prefixLast, displayPos)
+        val here = if (best == displayPos) atBest else support(recent, prefixLast, displayPos)
         if (here.atLeast(config.stepBits, 2)) {
             unsupportedWords = 0
             offScript = false
@@ -696,7 +769,38 @@ class SpeechTracker(
         }
     }
 
+    /**
+     * Where the marker should land for a move towards [high]: the farthest place down to [low] that
+     * the words just heard read as, ending exactly there (so no unheard word is passed), with enough
+     * evidence; -1 when there is none. Without [TrackerConfig.exactLanding] it is [high] itself.
+     */
+    private fun landing(
+        high: Int,
+        low: Int,
+        recent: List<HeardWord>,
+        prefixLast: Boolean,
+        bits: Double,
+        matches: Int,
+        content: Int,
+    ): Int {
+        landingHeard = -1
+        if (!config.exactLanding) return if (support(recent, prefixLast, high).atLeast(bits, matches, content)) high else -1
+        var q = high
+        while (q >= low && q >= 0) {
+            val sup = support(recent, prefixLast, q, from = displayPos, exactEnd = true)
+            if (sup.atLeast(bits, matches, content)) {
+                landingHeard = sup.lastHeard
+                return q
+            }
+            q--
+        }
+        return -1
+    }
+
     private fun accept(pos: Int) {
+        // The words that read up to here are spent: they cannot take the marker further later.
+        if (landingHeard >= 0) usedHeard = maxOf(usedHeard, landingHeard + 1)
+        landingHeard = -1
         displayPos = pos
         pendingPos = -1; pendingCount = 0; backCount = 0
     }
@@ -743,5 +847,8 @@ class SpeechTracker(
 
         /** Probability that 0,1,2... words were lost in the gap between two recogniser sessions. */
         val GAP_SPREAD = doubleArrayOf(0.55, 0.20, 0.11, 0.07, 0.04, 0.02, 0.01)
+
+        /** Sounds of hesitation that recognisers sometimes write down. */
+        val HESITATIONS = setOf("eh", "ehh", "eeh", "em", "emm", "mm", "mmm", "hm", "hmm", "um", "uh", "ah", "ahh")
     }
 }
