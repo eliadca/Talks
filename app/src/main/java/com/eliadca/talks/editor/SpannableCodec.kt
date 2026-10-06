@@ -33,8 +33,12 @@ object SpannableCodec {
     /** Inline runs grow when text is typed at their end, as in any word processor. */
     const val INLINE_FLAGS = Spannable.SPAN_EXCLUSIVE_INCLUSIVE
 
-    /** Paragraph spans are re-fitted to their paragraph after every edit, so growth rules do not matter. */
-    const val BLOCK_FLAGS = Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+    /**
+     * Paragraph spans are re-fitted to their paragraph after every edit. Their start is inclusive so
+     * that a newline typed at the very start of a list item grows the span (and is then split
+     * between the two paragraphs) instead of landing outside it.
+     */
+    const val BLOCK_FLAGS = Spannable.SPAN_INCLUSIVE_EXCLUSIVE
 
     /** Builds styled text for [doc], including the end marker. */
     fun toSpannable(doc: RichDoc, style: EditorStyle, withMarker: Boolean = true): SpannableStringBuilder {

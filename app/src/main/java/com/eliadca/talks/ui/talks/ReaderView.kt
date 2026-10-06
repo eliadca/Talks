@@ -30,7 +30,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** Colours of one reading theme (ARGB). */
-class ReaderPalette(
+data class ReaderPalette(
     val background: Int,
     val text: Int,
     val accent: Int,
@@ -46,7 +46,7 @@ class ReaderPalette(
     }
 }
 
-class ReaderConfig(
+data class ReaderConfig(
     val fontSp: Float,
     val lineSpacing: Float,
     val serif: Boolean,
@@ -111,6 +111,7 @@ class ReaderView(context: Context) : ScrollView(context) {
     }
 
     fun configure(config: ReaderConfig) {
+        if (config == cfg && content.layout != null) return
         val relayout = config.fontSp != cfg.fontSp || config.lineSpacing != cfg.lineSpacing ||
             config.serif != cfg.serif || config.anchor != cfg.anchor
         cfg = config
