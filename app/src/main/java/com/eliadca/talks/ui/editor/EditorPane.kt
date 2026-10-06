@@ -21,14 +21,14 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Label
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -114,7 +114,7 @@ fun EditorPane(
             }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { c.findOpen = !c.findOpen }) { Icon(Icons.Filled.Search, contentDescription = "Buscar en el discurso") }
-            IconButton(onClick = { dialog = EditorDialog.Outline }) { Icon(Icons.Filled.ViewList, contentDescription = "Esquema") }
+            IconButton(onClick = { dialog = EditorDialog.Outline }) { Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = "Esquema") }
             IconButton(onClick = { dialog = EditorDialog.History }) { Icon(Icons.Filled.History, contentDescription = "Versiones anteriores") }
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Más opciones") }
@@ -136,7 +136,7 @@ fun EditorPane(
                     )
                     DropdownMenuItem(
                         text = { Text("Etiqueta de color…") },
-                        leadingIcon = { Icon(Icons.Filled.Label, null) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.Label, null) },
                         onClick = { showMenu = false; dialog = EditorDialog.Label },
                     )
                     DropdownMenuItem(

@@ -138,7 +138,7 @@ class RepositoryAndBackupTest {
 
     @Test fun typicalPaceUsesRecentSubstantialRuns() = runBlocking {
         val id = repo.create("Charla")
-        assertEquals(130, repo.typicalWpm(130))
+        assertEquals(77, repo.typicalWpm(77))
         repo.recordSession(TalkSessionEntity(speechId = id, startedAt = 1, durationMs = 120_000, wordsSpoken = 300, wpm = 150, completion = 0.9f, engine = "x"))
         repo.recordSession(TalkSessionEntity(speechId = id, startedAt = 2, durationMs = 120_000, wordsSpoken = 250, wpm = 110, completion = 0.9f, engine = "x"))
         repo.recordSession(TalkSessionEntity(speechId = id, startedAt = 3, durationMs = 5_000, wordsSpoken = 5, wpm = 400, completion = 0.01f, engine = "x")) // too short

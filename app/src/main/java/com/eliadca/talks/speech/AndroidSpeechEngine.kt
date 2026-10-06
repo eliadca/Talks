@@ -208,6 +208,8 @@ class AndroidSpeechEngine(
 
         override fun onRmsChanged(rmsdB: Float) {
             val now = SystemClock.elapsedRealtime()
+            // A recogniser that still reports loudness is alive, even through a long silence.
+            lastActivity = now
             if (now - lastLevelAt < 80) return
             lastLevelAt = now
             emit(SpeechEvent.Level(((rmsdB + 2f) / 12f).coerceIn(0f, 1f)))

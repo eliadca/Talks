@@ -42,6 +42,8 @@ class TalksSession(
     private val index: ScriptIndex,
     private val engine: SpeechEngine,
     private val highlightWords: Int,
+    /** Monotonic milliseconds; replaceable so that tests do not depend on the platform clock. */
+    private val now: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
     data class State(
         /** Index of the next word the speaker should say. */
@@ -94,8 +96,10 @@ class TalksSession(
         furthest = this.startPosition
         startedAtWall = System.currentTimeMillis()
         activeMs = 0
-        activeSince = SystemClock.elapsedRealtime()
+        activeSince = now()
 
+        // Set the state before anything can report into it, so an early failure is not wiped out.
+        mutableState.update { it.copy(listening = true, error = null) }
         collectJob = scope.launch(trackerDispatcher) {
             tracker.reset(this@TalksSession.startPosition)
             publish(manual = false)
@@ -107,7 +111,6 @@ class TalksSession(
                 delay(250)
             }
         }
-        mutableState.update { it.copy(listening = true, error = null) }
         engine.start()
     }
 
@@ -119,16 +122,16 @@ class TalksSession(
         val rate = wpm.coerceIn(40, 300)
         autoJob?.cancel()
         if (mutableState.value.listening) engine.stop()
-        if (activeSince == 0L) activeSince = SystemClock.elapsedRealtime()
+        if (activeSince == 0L) activeSince = now()
         mutableState.update { it.copy(auto = true, autoWpm = rate, listening = false, level = 0f, error = null) }
         autoJob = scope.launch(trackerDispatcher) {
             var carry = 0.0
-            var last = SystemClock.elapsedRealtime()
+            var last = now()
             while (isActive) {
                 delay(100)
-                val now = SystemClock.elapsedRealtime()
-                carry += (now - last) * mutableState.value.autoWpm / 60_000.0
-                last = now
+                val tick = now()
+                carry += (tick - last) * mutableState.value.autoWpm / 60_000.0
+                last = tick
                 val whole = carry.toInt()
                 if (whole > 0) {
                     carry -= whole
@@ -170,7 +173,7 @@ class TalksSession(
 
     fun resume() {
         if (mutableState.value.listening) return
-        activeSince = SystemClock.elapsedRealtime()
+        activeSince = now()
         mutableState.update { it.copy(listening = true, error = null) }
         engine.start()
     }
@@ -178,7 +181,7 @@ class TalksSession(
     /** Retries after a fatal recogniser error. */
     fun retry() {
         engine.stop()
-        activeSince = if (activeSince == 0L) SystemClock.elapsedRealtime() else activeSince
+        activeSince = if (activeSince == 0L) now() else activeSince
         mutableState.update { it.copy(listening = true, error = null) }
         engine.start()
     }
@@ -225,7 +228,7 @@ class TalksSession(
     // --- internals --------------------------------------------------------------------------------
 
     private fun currentActiveMs(): Long =
-        if (activeSince == 0L) activeMs else activeMs + (SystemClock.elapsedRealtime() - activeSince)
+        if (activeSince == 0L) activeMs else activeMs + (now() - activeSince)
 
     private fun handle(event: SpeechEvent) {
         when (event) {

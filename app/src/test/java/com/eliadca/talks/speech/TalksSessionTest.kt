@@ -52,7 +52,8 @@ class TalksSessionTest {
         engine = FakeEngine()
         val doc = SampleContent.practice
         index = ScriptIndex.build(doc.text, doc.silentRanges(readHeadings = false))
-        session = TalksSession(scope, index, engine, highlightWords = 9)
+        // Robolectric's platform clock does not advance by itself, so the session gets a real one.
+        session = TalksSession(scope, index, engine, highlightWords = 9, now = { System.nanoTime() / 1_000_000 })
     }
 
     @After
@@ -195,6 +196,7 @@ class TalksSessionTest {
         assertFalse(session.state.value.auto)
         assertTrue(session.state.value.listening)
         assertEquals(2, engine.started)
+        Thread.sleep(200) // let an in-flight tick settle
         val p = session.state.value.position
         Thread.sleep(500)
         assertEquals("no longer advancing by itself", p, session.state.value.position)
@@ -207,6 +209,7 @@ class TalksSessionTest {
         session.pause()
         assertFalse(session.state.value.auto)
         assertFalse(session.state.value.listening)
+        Thread.sleep(400) // let an in-flight tick and the clock settle
         val p = session.state.value.position
         val t = session.state.value.elapsedMs
         Thread.sleep(600)

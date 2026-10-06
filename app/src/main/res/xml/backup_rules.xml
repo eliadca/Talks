@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Speeches (the Room database and settings) are backed up; the large offline voice model is not. -->
+<full-backup-content>
+    <exclude domain="file" path="vosk/" />
+    <exclude domain="sharedpref" path="sound_muter.xml" />
+</full-backup-content>

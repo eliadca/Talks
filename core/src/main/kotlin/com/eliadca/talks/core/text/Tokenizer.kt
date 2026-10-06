@@ -94,7 +94,60 @@ object Tokenizer {
                 else -> i++
             }
         }
-        return tokens
+        return mergeScriptPairs(tokens)
+    }
+
+    /**
+     * Word pairs that recognisers write either apart or together ("por que" / "porque"). Both the
+     * script and what is heard are folded to the joined form, so they align whichever is used.
+     */
+    private val joinedPairs: Map<Pair<String, String>, String> = mapOf(
+        ("por" to "que") to "porque",
+        ("tan" to "bien") to "tambien",
+        ("tan" to "poco") to "tampoco",
+        ("si" to "no") to "sino",
+        ("asi" to "mismo") to "asimismo",
+        ("con" to "migo") to "conmigo",
+        ("con" to "tigo") to "contigo",
+        ("en" to "seguida") to "enseguida",
+        ("a" to "penas") to "apenas",
+        ("a" to "veces") to "aveces",
+    )
+
+    private fun mergeScriptPairs(tokens: List<ScriptToken>): List<ScriptToken> {
+        if (tokens.size < 2) return tokens
+        val out = ArrayList<ScriptToken>(tokens.size)
+        var i = 0
+        while (i < tokens.size) {
+            val a = tokens[i]
+            val b = tokens.getOrNull(i + 1)
+            val joined = if (b != null && a.boundary == Boundary.NONE && a.paragraph == b.paragraph) joinedPairs[a.norm to b.norm] else null
+            if (joined != null && b != null) {
+                out += ScriptToken(joined, SpanishText.phonetic(joined), a.start, b.end, b.boundary, a.paragraph)
+                i += 2
+            } else {
+                out += a
+                i++
+            }
+        }
+        return out
+    }
+
+    private fun mergeHeardPairs(words: List<HeardWord>): List<HeardWord> {
+        if (words.size < 2) return words
+        val out = ArrayList<HeardWord>(words.size)
+        var i = 0
+        while (i < words.size) {
+            val joined = words.getOrNull(i + 1)?.let { joinedPairs[words[i].norm to it.norm] }
+            if (joined != null) {
+                out += HeardWord(joined, SpanishText.phonetic(joined))
+                i += 2
+            } else {
+                out += words[i]
+                i++
+            }
+        }
+        return out
     }
 
     /** Normalises recogniser output ("hola a todos 2024") into comparable words. */
@@ -119,7 +172,7 @@ object Tokenizer {
                 else -> i++
             }
         }
-        return out
+        return mergeHeardPairs(out)
     }
 
     private fun addHeard(out: MutableList<HeardWord>, canonical: String) {

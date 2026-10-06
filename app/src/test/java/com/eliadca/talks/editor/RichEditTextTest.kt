@@ -242,13 +242,12 @@ class RichEditTextTest {
         assertEquals(listOf(BlockType.BULLET, BlockType.NORMAL), blocks())
         // A second backspace now joins the lines as usual.
         edit.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
-        edit.text.delete(3, 4)
         assertEquals("unodos", doc().text)
     }
 
     @Test fun mergingParagraphsKeepsTheUpperParagraphFormatting() {
         edit.loadDocument(Markup.parse("# Titulo\ncuerpo"))
-        edit.text.delete(8, 9) // the newline
+        edit.text.delete(6, 7) // the newline after "Titulo"
         assertEquals("Titulocuerpo", doc().text)
         assertEquals(listOf(BlockType.H1), blocks())
     }

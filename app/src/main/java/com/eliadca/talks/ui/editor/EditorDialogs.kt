@@ -86,7 +86,7 @@ fun HistoryDialog(
 ) {
     var label by remember { mutableStateOf("") }
     var confirmRestore by remember { mutableStateOf<VersionItem?>(null) }
-    val format = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale("es")) }
+    val format = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.forLanguageTag("es")) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Versiones anteriores") },

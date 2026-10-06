@@ -63,6 +63,23 @@ class TokenizerTest {
             norms("Nació en 1985. Es cierto"))
     }
 
+    @Test fun wordsThatRecognisersSplitOrJoinAreFoldedTogether() {
+        // Script says "porque", the recogniser heard "por que" (and the reverse).
+        assertEquals(listOf("porque", "te", "quiero", "tambien"), norms("Porque te quiero, también"))
+        assertEquals(listOf("porque", "te", "quiero", "tambien"), norms("Por qué te quiero, tan bien"))
+        assertEquals(listOf("porque", "te", "quiero", "tambien"), Tokenizer.heard("por que te quiero tan bien").map { it.norm })
+        assertEquals(listOf("porque", "te", "quiero", "tambien"), Tokenizer.heard("porque te quiero también").map { it.norm })
+        // A pair separated by punctuation is not one word.
+        assertEquals(listOf("por", "que"), norms("por. que"))
+    }
+
+    @Test fun joinedPairKeepsTheRangeOfBothWords() {
+        val text = "Dime por que vienes"
+        val t = Tokenizer.script(text)
+        assertEquals(listOf("dime", "porque", "vienes"), t.map { it.norm })
+        assertEquals("por que", text.substring(t[1].start, t[1].end))
+    }
+
     @Test fun heardTextIsNormalisedLikeTheScript() {
         val h = Tokenizer.heard("Hola a todos, en 2024 vamos")
         assertEquals(listOf("hola", "a", "todos", "en", "dos", "mil", "veinticuatro", "vamos"), h.map { it.norm })

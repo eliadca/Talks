@@ -359,7 +359,7 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
         if (findIndex !in findMatches.indices) return
         val m = findMatches[findIndex]
         val keep = findIndex
-        text.replace(m.first, m.last + 1, replacement)
+        replaceKeepingStyle(m.first, m.last + 1, replacement)
         // afterTextChanged recomputed the matches; stay at the same ordinal, which is now the next one.
         if (findMatches.isNotEmpty()) goToMatch(min(keep, findMatches.size - 1))
     }
@@ -369,7 +369,7 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
         beginFormatGroup()
         val matches = findMatches
         internal {
-            for (m in matches.asReversed()) text.replace(m.first, m.last + 1, replacement)
+            for (m in matches.asReversed()) replaceKeepingStyle(m.first, m.last + 1, replacement)
             normalizeParagraphs(text, 0, text.length)
             renumber()
         }
@@ -377,6 +377,34 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
         notifyChanged()
         notifyFormat()
         return matches.size
+    }
+
+    /**
+     * Replaces [start, endExclusive) with [replacement]. Inline styles that covered the whole
+     * replaced text (a bold name, a coloured word) are stretched over the new text, which Android
+     * does not do by itself when the run is replaced entirely.
+     */
+    private fun replaceKeepingStyle(start: Int, endExclusive: Int, replacement: String) {
+        val e = text
+        class Covering(val span: Any, val start: Int, val end: Int, val flags: Int)
+        val covering = ArrayList<Covering>()
+        for (span in e.getSpans(start, endExclusive, Any::class.java)) {
+            val isStyle = span is StyleSpan || span is UnderlineSpan || span is StrikethroughSpan ||
+                span is ForegroundColorSpan || span is RelativeSizeSpan || span is StageSpan ||
+                (span is BackgroundColorSpan && span !is FindSpan && span !is FindCurrentSpan)
+            if (!isStyle) continue
+            val ss = e.getSpanStart(span)
+            val se = e.getSpanEnd(span)
+            if (ss <= start && se >= endExclusive) covering += Covering(span, ss, se, e.getSpanFlags(span))
+        }
+        e.replace(start, endExclusive, replacement)
+        val delta = replacement.length - (endExclusive - start)
+        for (c in covering) {
+            val newEnd = (c.end + delta).coerceAtMost(contentLength)
+            if (newEnd > c.start && (e.getSpanStart(c.span) != c.start || e.getSpanEnd(c.span) != newEnd)) {
+                e.setSpan(c.span, c.start, newEnd, c.flags)
+            }
+        }
     }
 
     fun clearFind() {
