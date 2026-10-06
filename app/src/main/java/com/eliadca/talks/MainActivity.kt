@@ -31,6 +31,8 @@ import com.eliadca.talks.ui.talks.TalksScreen
 import com.eliadca.talks.ui.theme.TalksTheme
 import com.eliadca.talks.ui.theme.isDarkFor
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.LaunchedEffect
+import androidx.activity.SystemBarStyle
 
 class MainActivity : ComponentActivity() {
 
@@ -89,6 +91,17 @@ private fun TalksRoot() {
     val settings by container.settings.settings.collectAsState(initial = AppSettings())
     val dark = isDarkFor(settings.themeMode)
     val scope = rememberCoroutineScope()
+
+    // The clock, battery and navigation icons follow the app's theme, not the phone's.
+    LaunchedEffect(dark) {
+        val activity = context as? ComponentActivity ?: return@LaunchedEffect
+        val bars = if (dark) {
+            SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+        }
+        activity.enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+    }
 
     val home: HomeViewModel = viewModel()
     val editor: EditorViewModel = viewModel()

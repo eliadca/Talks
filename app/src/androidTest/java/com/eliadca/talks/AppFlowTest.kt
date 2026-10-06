@@ -365,6 +365,29 @@ class AppFlowTest {
     }
 
     @Test
+    fun darkThemeKeepsHeadersReadableAndNotesStayBehindTheBars() {
+        runBlocking(Dispatchers.IO) { container.settings.update { it.copy(themeMode = com.eliadca.talks.data.ThemeMode.DARK) } }
+        val long = (1..60).joinToString("\n") { "Párrafo $it del discurso [nota $it para mí] con algo más de texto para leer." }
+        runBlocking { container.speeches.create("Notas en la oscuridad", Markup.parse("# Título oscuro\n$long")) }
+        assertTrue("the tablet must be in landscape", forceLandscape())
+        waitForText("Notas en la oscuridad")
+        Thread.sleep(800)
+        Shots.take("dark-library")
+        compose.onAllNodesWithText("Notas en la oscuridad")[0].performClick()
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+        // Scroll the page: the note backgrounds must go behind the toolbar, not over it.
+        onView(isAssignableFrom(RichEditText::class.java)).perform(swipeUp(), swipeUp())
+        Thread.sleep(1000)
+        Shots.take("dark-editor-scrolled")
+        clickVisible("Ajustes")
+        waitForText("Modo Talks")
+        Thread.sleep(600)
+        Shots.take("dark-settings")
+        compose.onNodeWithContentDescription("Volver").performClick()
+        waitForText("Todos")
+    }
+
+    @Test
     fun settingsOpenFromTheMenu() {
         forceLandscape()
         waitForText("Ajustes")

@@ -10,8 +10,12 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 ## Qué incluye
 
 ### Modo Talks (lo principal)
-- **Sigue tu voz en español** y marca en pantalla la siguiente frase (subrayado grueso + resaltado + flecha en el margen).
-  Lo ya dicho se atenúa y el texto se desplaza solo, manteniendo la línea actual a una altura fija con varias líneas por delante.
+- **Sigue tu voz en español** y marca en pantalla **la frase que estás diciendo, entera y quieta**: no se mueve bajo tus ojos mientras la lees y solo
+  salta a la siguiente cuando la terminas (subrayado + resaltado suave + flecha en el margen). Lo ya dicho se atenúa y el texto sube solo, línea a línea,
+  manteniendo la línea actual a una altura fija con varias líneas por delante. **Las notas `[entre corchetes]` y los títulos nunca se marcan.**
+- **Botón «Marcado»** (en la barra de controles y en Ajustes): elige **Frase** (recomendado), **Oración** (bloques más largos), **Palabra a palabra**
+  o **Sin marcar** (solo una línea de lectura), y **Atrasar / Adelantar** el marcado hasta 3 palabras respecto a tu voz para ajustarlo a tu ritmo.
+- **No se adelanta a tu voz**: una palabra suelta al final de una línea («eh», «este», una «y» de respiración) ya no hace saltar la primera palabra de la siguiente.
 - **Tolera la improvisación y los cambios de tema**: si improvisas o hablas un buen rato de algo que no tiene nada que ver (saludos, una anécdota,
   preguntas del público), el marcador **se queda quieto donde dejaste el texto** (estado «Improvisando») y vuelve a engancharse en cuanto retomas el guion,
   aunque sea más adelante. El marcador solo se mueve cuando lo que oye coincide de verdad con el texto, en orden y con palabras significativas: las frases
@@ -115,7 +119,9 @@ La variante `app-debug.apk` se instala junto a la normal (otro nombre de paquete
 El guion se convierte en una secuencia de palabras normalizadas (sin acentos, con números expandidos y notas entre corchetes ignoradas).
 Cada trozo de voz que entrega el reconocedor se compara con el guion mediante un **modelo oculto de Markov** de dos modos (*leyendo* / *improvisando*) sobre la posición
 en el guion: cada palabra puede ser la siguiente, una posterior (te saltaste algo), una palabra extra o un salto a otro punto. La evidencia de cada coincidencia se pondera por
-lo rara que es la palabra («esperanza» pesa mucho, «de» casi nada) y el resultado se filtra para que el marcador no salte por un reconocimiento dudoso.
+lo rara que es la palabra («esperanza» pesa mucho, «de» casi nada) y el resultado se filtra para que el marcador no salte por un reconocimiento dudoso:
+el marcador **aterriza justo después de la última palabra que de verdad oyó** (nunca da por dicha una palabra que aún no has dicho), una palabra suelta y común
+no basta para saltar otras, y las palabras que ya lo movieron no cuentan dos veces en un pasaje repetido.
 Está en el módulo `core` (Kotlin puro) y se valida con un simulador de orador que mide la precisión frente a errores, improvisación, saltos y repeticiones.
 
 ## Para desarrolladores
@@ -133,12 +139,17 @@ app/    Android: Compose (biblioteca, ajustes, modo Talks), editor basado en Edi
 - Hay un gancho de pruebas, `AppContainer.speechEngineFactory`, para inyectar un reconocedor falso.
 
 ### Qué está verificado y qué no
-Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 146 pruebas automáticas (73 del motor, 73 con Robolectric) más 8 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
+Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 168 pruebas automáticas (87 del motor, 81 con Robolectric) más 9 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
 
 - **Seguimiento de voz** (`:core:test`, simulador de orador con reconocimiento defectuoso): el marcador se mantiene en su sitio en >99,5 % de las lecturas sin errores,
   >97 % con un 6 % de palabras mal reconocidas y un 3 % perdidas, >90 % con un 15 % mal reconocidas, >92 % improvisando frases nuevas y >90 % si lo improvisado reutiliza palabras del guion.
   Tras saltarse o repetir frases, la mediana de recuperación es de 8 palabras o menos (percentil 90: 20 o menos). Con guiones de más de 9 000 palabras, cada actualización cuesta muy por debajo de 25 ms.
   También se prueba con frases repetidas (estribillos), reconocedores que solo entregan resultados finales, y la normalización del español (acentos, b/v, números…).
+- **Inicios de línea** (`:core:test`): leyendo con muletillas y pausas del reconocedor al final de las frases, el marcador se saltaba la primera palabra de la
+  siguiente en el 17,5 % de los casos; ahora en ninguno (0,13 % con un reconocedor muy ruidoso). Además se prueba, frase por frase de todo el discurso de práctica,
+  con siete palabras sueltas distintas en tres situaciones (1 101 casos).
+- **Marcado** (`:core:test` y Robolectric): las frases no cruzan notas ni finales de oración, el marcado nunca toca notas, títulos ni saltos de línea, la frase
+  marcada no cambia mientras la dices, y con «Adelantar» nada que no hayas dicho aparece atenuado.
 - **Hablar de otra cosa** (`:core:test`, simulación con charla real en español sobre otros temas —el aeropuerto, el fútbol, el tráfico—, de 40 a 400 palabras):
   el marcador se queda quieto donde dejaste el texto en ≥97 % de las digresiones (deriva máxima de 6–9 palabras; antes de esta versión, solo en el 4–9 % y podía
   saltar cientos de palabras) y te vuelve a encontrar en 0–4 palabras cuando retomas el guion.
@@ -147,10 +158,11 @@ Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 146 pruebas au
   y pegar Markdown o texto copiado en Talks con su formato (un solo paso para deshacer).
 - **Markdown** (`:core:test`): lo que exporta Talks se vuelve a importar idéntico (muestras incluidas), los signos sueltos se escapan, el Markdown típico de una IA
   (bloques de código, `####`, `__negrita__`, enlaces) se importa limpio, y la plantilla para tu IA explica cada formato y su ejemplo los usa todos.
-- **App real en un emulador de tablet** (Pixel Tablet, Android 14, 8 pruebas, con capturas de pantalla reales en cada ejecución): abre la biblioteca; escribe y pone negrita en el editor real
+- **App real en un emulador de tablet** (Pixel Tablet, Android 14, 9 pruebas, con capturas de pantalla reales en cada ejecución): en tema oscuro muestra biblioteca,
+  editor desplazado y ajustes con títulos legibles; abre la biblioteca; escribe y pone negrita en el editor real
   comprobando lo guardado; pega desde el portapapeles la respuesta de una IA en Markdown (llega con títulos, negrita y listas), la copia de vuelta como Markdown y abre la plantilla para tu IA; en horizontal muestra menú plegado, lista y editor, pliega la lista a pantalla completa y abre el menú completo; en vertical lista y editor se turnan
   y **deslizar sobre el discurso no abre el menú lateral**; abre los ajustes desde el menú; carga las librerías nativas de Vosk; y recorre todo el modo Talks
-  (preparación → «Escuchando» → «Siguiendo» → **modo manual** → «Seguir con la voz desde aquí» → «Improvisando» → «Fin del discurso» → resumen).
+  (preparación → «Escuchando» → «Siguiendo» → **Marcado: Oración, Adelantar** → **modo manual** → «Seguir con la voz desde aquí» → «Improvisando» → «Fin del discurso» → resumen).
 - **No verificable sin un dispositivo físico con micrófono**: la calidad real del reconocimiento del servicio de Android/Google o de Vosk en tu tablet y con tu micrófono
   (las pruebas usan un orador simulado, no audio real), el comportamiento exacto del S Pen y de los mandos Bluetooth concretos.
   Por eso el modo Talks incluye prueba de micrófono, respaldo manual y aviso de errores. **Ensaya con tu equipo antes de un acto importante.**

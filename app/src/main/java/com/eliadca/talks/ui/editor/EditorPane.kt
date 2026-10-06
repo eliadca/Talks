@@ -83,6 +83,7 @@ import com.eliadca.talks.ui.home.SpeechActions
 import com.eliadca.talks.ui.home.formatDuration
 import androidx.compose.material.icons.filled.CopyAll
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.ui.draw.clipToBounds
 
 /** The open speech: title, formatting bar, page and status line. */
 @Composable
@@ -396,7 +397,8 @@ private fun PageEditor(
 
     androidx.compose.runtime.key(speechId) {
         AndroidView(
-            modifier = modifier,
+            // A safety net: nothing the page draws may cover the bars above it.
+            modifier = modifier.clipToBounds(),
             factory = { ctx ->
                 val themed = ContextThemeWrapper(ctx, if (dark) R.style.EditorTheme_Dark else R.style.EditorTheme_Light)
                 val style = EditorStyle(ctx.resources.displayMetrics.density, accent, muted, noteColor = noteTint(dark))

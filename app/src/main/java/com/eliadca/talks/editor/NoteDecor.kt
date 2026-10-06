@@ -2,6 +2,7 @@ package com.eliadca.talks.editor
 
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.text.Layout
 import android.text.Spanned
@@ -15,10 +16,19 @@ object NoteDecor {
     private const val ALPHA = 0x2E
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
+    private val clip = Rect()
+    private var visibleFirst = 0
+    private var visibleLast = 0
 
     fun draw(canvas: Canvas, layout: Layout, text: CharSequence, style: EditorStyle) {
         val sp = text as? Spanned ?: return
-        val spans = sp.getSpans(0, sp.length, NoteSpan::class.java)
+        // Only the lines in view are drawn (a long speech has many notes).
+        if (!canvas.getClipBounds(clip) || layout.lineCount == 0) return
+        visibleFirst = layout.getLineForVertical(clip.top.coerceAtLeast(0))
+        visibleLast = layout.getLineForVertical(clip.bottom.coerceAtLeast(0))
+        val from = layout.getLineStart(visibleFirst)
+        val to = layout.getLineEnd(visibleLast)
+        val spans = sp.getSpans(from, to, NoteSpan::class.java)
         if (spans.isEmpty()) return
         val ranges = spans
             .map { sp.getSpanStart(it) to sp.getSpanEnd(it) }
@@ -48,7 +58,7 @@ object NoteDecor {
         if (e <= s) return
         val first = l.getLineForOffset(s)
         val last = l.getLineForOffset(e - 1)
-        for (line in first..last) {
+        for (line in maxOf(first, visibleFirst)..minOf(last, visibleLast)) {
             val left = if (line == first) l.getPrimaryHorizontal(s) else l.getLineLeft(line)
             var right = if (line == last) l.getPrimaryHorizontal(e) else l.getLineRight(line)
             // At the end of a wrapped line the offset reports the start of the next line.

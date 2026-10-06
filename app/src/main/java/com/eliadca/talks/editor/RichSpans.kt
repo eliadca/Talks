@@ -145,7 +145,8 @@ class BlockSpan(
             p.color = style.accent
             c.drawRoundRect(left, top, left + size, top + size, size * 0.2f, size * 0.2f, p)
             p.style = Paint.Style.STROKE
-            p.color = 0xFFFFFFFF.toInt()
+            // White on a deep accent, near-black on the light accent of the dark theme.
+            p.color = if (androidx.core.graphics.ColorUtils.calculateLuminance(style.accent) > 0.5) 0xFF1A1B22.toInt() else 0xFFFFFFFF.toInt()
             p.strokeCap = Paint.Cap.ROUND
             val path = android.graphics.Path().apply {
                 moveTo(left + size * 0.22f, top + size * 0.54f)

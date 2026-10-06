@@ -157,9 +157,12 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     }
 
     override fun onDraw(canvas: Canvas) {
-        // Notes for the speaker get a soft rounded background, under the text.
+        // Notes for the speaker get a soft rounded background, under the text. Only the part of the
+        // page in view: the text view clips its own drawing later, and nothing else stops these
+        // backgrounds from spilling over the toolbar above while scrolling.
         layout?.let { l ->
             canvas.save()
+            canvas.clipRect(scrollX, scrollY, scrollX + width, scrollY + height)
             canvas.translate(totalPaddingLeft.toFloat(), totalPaddingTop.toFloat())
             NoteDecor.draw(canvas, l, text, style)
             canvas.restore()

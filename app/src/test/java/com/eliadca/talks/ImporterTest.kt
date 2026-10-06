@@ -77,6 +77,22 @@ class ImporterTest {
         assertTrue(binary.exceptionOrNull()?.message.orEmpty().contains("no es un archivo de texto"))
     }
 
+    @Test fun plainInkColoursFromWordAreDroppedButRealColoursStay() = runBlocking {
+        val w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        fun run(color: String, text: String) = "<w:r><w:rPr><w:color w:val=\"$color\"/></w:rPr><w:t xml:space=\"preserve\">$text</w:t></w:r>"
+        val document = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="$w"><w:body><w:p>${run("434343", "gris ")}${run("F2F2F2", "blanco ")}${run("E53935", "rojo")}</w:p></w:body></w:document>"""
+        val bytes = java.io.ByteArrayOutputStream().also { out ->
+            ZipOutputStream(out).use { z ->
+                z.putNextEntry(ZipEntry("word/document.xml")); z.write(document.toByteArray()); z.closeEntry()
+            }
+        }.toByteArray()
+        val r = importer.read(temp("colores.docx", bytes))
+        val colours = r.doc.spans.filter { it.type == SpanType.COLOR }
+        assertEquals(1, colours.size)
+        assertEquals("rojo", r.doc.text.substring(colours[0].start, colours[0].end))
+    }
+
     @Test fun wordDocumentKeepsHeadingsStylesAndLists() = runBlocking {
         val w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         val document = """<?xml version="1.0" encoding="UTF-8"?>

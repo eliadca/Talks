@@ -75,6 +75,18 @@ class Importer(private val resolver: ContentResolver) {
 /** A small reader for the parts of Word documents that matter in a speech. */
 internal object DocxReader {
 
+    /**
+     * Black, dark greys and near-white are just the ink of the document (often written by Google Docs
+     * or a dark-mode editor): kept, they would vanish on a page of the opposite colour. Real colours stay.
+     */
+    fun isPlainInk(rgb: Int): Boolean {
+        val r = (rgb shr 16) and 0xFF
+        val g = (rgb shr 8) and 0xFF
+        val b = rgb and 0xFF
+        val grey = maxOf(r, g, b) - minOf(r, g, b) <= 0x14
+        return grey && (maxOf(r, g, b) <= 0x59 || minOf(r, g, b) >= 0xE6)
+    }
+
     private const val NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
     fun read(bytes: ByteArray): RichDoc {
@@ -199,7 +211,7 @@ internal object DocxReader {
                     "strike" -> if (inRunProps) run.strike = attr("val") != "0" && attr("val") != "false"
                     "color" -> if (inRunProps) {
                         val v = attr("val")
-                        if (v != null && v.length == 6 && v != "000000") v.toIntOrNull(16)?.let { run.color = 0xFF000000.toInt() or it }
+                        if (v != null && v.length == 6) v.toIntOrNull(16)?.let { if (!isPlainInk(it)) run.color = 0xFF000000.toInt() or it }
                     }
                     "highlight" -> if (inRunProps) run.highlight = Markup.HIGHLIGHT_YELLOW
                     "t" -> inText = true
