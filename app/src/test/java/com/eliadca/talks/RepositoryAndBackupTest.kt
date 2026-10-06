@@ -67,10 +67,10 @@ class RepositoryAndBackupTest {
         repo.create("Otro", Markup.parse("Nada que ver"))
         assertEquals(1, repo.search("cancion").first().size)
         assertEquals(1, repo.search("CAÑONES").first().size)
-        assertEquals(1, repo.search("canones").first().size.coerceAtLeast(1)) // ñ stays distinct from n; no crash
-        assertEquals(1, repo.search("diez bandas").first().size.coerceAtLeast(1))
+        assertEquals("ñ is a different letter from n", 0, repo.search("canones").first().size)
+        assertEquals("every word must match, in order", 1, repo.search("diez banda").first().size)
         assertEquals(0, repo.search("zzz").first().size)
-        assertEquals(1, repo.search("100%_").first().size.coerceAtMost(1).let { 1 }) // wildcards are escaped, no crash
+        assertEquals("SQL wildcards in the query are escaped", 0, repo.search("100%_").first().size)
     }
 
     @Test fun trashRestoreAndPurge() = runBlocking {
