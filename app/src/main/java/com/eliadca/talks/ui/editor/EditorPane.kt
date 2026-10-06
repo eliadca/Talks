@@ -1,5 +1,6 @@
 package com.eliadca.talks.ui.editor
 
+import androidx.compose.foundation.layout.width
 import android.view.ContextThemeWrapper
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background

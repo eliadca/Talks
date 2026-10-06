@@ -1,5 +1,6 @@
 package com.eliadca.talks.ui.editor
 
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.background
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight

@@ -1,5 +1,6 @@
 package com.eliadca.talks.ui.settings
 
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.draw.clip
