@@ -27,7 +27,9 @@ class VoskSpeechEngine(
     override val name: String = "Vosk"
 
     private val main = Handler(Looper.getMainLooper())
-    private val mutableEvents = MutableSharedFlow<SpeechEvent>(extraBufferCapacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    // A little replay so that events emitted while starting (such as an immediate failure) reach a
+    // collector that subscribes a moment later.
+    private val mutableEvents = MutableSharedFlow<SpeechEvent>(replay = 16, extraBufferCapacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val events: SharedFlow<SpeechEvent> = mutableEvents.asSharedFlow()
 
     private var model: Model? = null
