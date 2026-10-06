@@ -110,7 +110,7 @@ class TalksViewModel(private val app: Application) : AndroidViewModel(app) {
 
     // --- engines --------------------------------------------------------------------------------
 
-    private fun createEngine(s: AppSettings): SpeechEngine = when (s.engine) {
+    private fun createEngine(s: AppSettings): SpeechEngine = container.speechEngineFactory?.invoke(s) ?: when (s.engine) {
         EngineKind.VOSK -> VoskSpeechEngine(app, container.voskModel.manager.modelDir)
         EngineKind.ANDROID -> AndroidSpeechEngine(
             app,

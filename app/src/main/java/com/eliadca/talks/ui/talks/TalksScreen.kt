@@ -590,7 +590,7 @@ private fun PreparePanel(
     val doc = vm.speech?.doc
     val seconds = doc?.estimatedSeconds(settings.wordsPerMinute, settings.readHeadings) ?: 0
     val voskInstalled by model.installed.collectAsState()
-    val engineReady = when (settings.engine) {
+    val engineReady = context.container.speechEngineFactory != null || when (settings.engine) {
         EngineKind.ANDROID -> serviceAvailable
         EngineKind.VOSK -> voskInstalled
     }

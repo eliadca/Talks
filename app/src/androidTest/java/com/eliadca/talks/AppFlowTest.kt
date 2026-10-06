@@ -1,0 +1,206 @@
+package com.eliadca.talks
+
+import android.Manifest
+import android.app.UiAutomation
+import android.content.Context
+import android.util.Log
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.printToLog
+import androidx.compose.ui.test.and
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
+import androidx.test.espresso.action.ViewActions.typeText
+import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.rule.GrantPermissionRule
+import com.eliadca.talks.core.doc.Markup
+import com.eliadca.talks.core.doc.SpanType
+import com.eliadca.talks.core.sample.SampleContent
+import com.eliadca.talks.data.AppSettings
+import com.eliadca.talks.data.EngineKind
+import com.eliadca.talks.editor.RichEditText
+import com.eliadca.talks.speech.SpeechEngine
+import com.eliadca.talks.speech.SpeechEvent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.After
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/** Drives the real app on an emulator: library, editor, tablet layout and Talks mode. */
+@RunWith(AndroidJUnit4::class)
+class AppFlowTest {
+
+    @get:Rule(order = 0)
+    val permission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO)
+
+    @get:Rule(order = 1)
+    val compose = createAndroidComposeRule<MainActivity>()
+
+    private val context: Context get() = ApplicationProvider.getApplicationContext()
+    private val container get() = context.container
+
+    private class FakeEngine : SpeechEngine {
+        val flow = MutableSharedFlow<SpeechEvent>(replay = 16, extraBufferCapacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+        override val events: SharedFlow<SpeechEvent> = flow
+        override val name = "Fake"
+        override fun start() {}
+        override fun stop() {}
+        override fun release() {}
+        fun hear(text: String, final: Boolean = false) {
+            flow.tryEmit(if (final) SpeechEvent.Final(text) else SpeechEvent.Partial(text))
+        }
+    }
+
+    @Before
+    fun prepare() = runBlocking(Dispatchers.IO) {
+        // Wait for the first-launch sample content, then start from an empty library.
+        withTimeout(20_000) { while (!container.settings.settings.first().seeded) delay(100) }
+        container.database.clearAllTables()
+        container.settings.update { AppSettings(seeded = true, engine = EngineKind.ANDROID) }
+    }
+
+    @After
+    fun cleanUp() {
+        container.speechEngineFactory = null
+        InstrumentationRegistry.getInstrumentation().uiAutomation.setRotation(UiAutomation.ROTATION_UNFREEZE)
+    }
+
+    private fun waitForText(text: String, timeoutMs: Long = 15_000) {
+        compose.waitUntil(timeoutMs) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    private fun <T> eventually(timeoutMs: Long = 8_000, block: () -> T?): T {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            val v = block()
+            if (v != null) return v
+            if (System.currentTimeMillis() > end) throw AssertionError("condition not reached in ${timeoutMs}ms")
+            Thread.sleep(100)
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------
+
+    @Test
+    fun startsUpAndShowsTheLibrary() {
+        val id = runBlocking { container.speeches.create("Mi primera charla", Markup.parse("Hola a todos")) }
+        waitForText("Mi primera charla")
+        compose.onRoot().printToLog("TALKS_TREE_HOME")
+        Ascii.shot("library")
+        assertTrue(id > 0)
+    }
+
+    @Test
+    fun editingInTheRealEditorIsSavedWithItsFormatting() {
+        runBlocking { container.speeches.create("Para editar", Markup.parse("Hola")) }
+        waitForText("Para editar")
+        compose.onAllNodesWithText("Para editar")[0].performClick()
+
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+        Ascii.shot("editor-open")
+
+        onView(isAssignableFrom(RichEditText::class.java)).perform(click(), typeText(" mundo"))
+        compose.onNodeWithContentDescription("Negrita (Ctrl+B)").performClick()
+        onView(isAssignableFrom(RichEditText::class.java)).perform(typeText(" fuerte"), closeSoftKeyboard())
+        Ascii.shot("editor-typed")
+
+        val saved = eventually(10_000) {
+            runBlocking(Dispatchers.IO) {
+                val items = container.speeches.observeActive().first()
+                items.firstOrNull { it.title == "Para editar" }?.let { container.speeches.load(it.id) }
+            }?.takeIf { it.doc.text.contains("fuerte") }
+        }
+        Log.i("TALKS_TEST", "saved text='${saved.doc.text}' spans=${saved.doc.spans}")
+        assertTrue(saved.doc.text.contains("mundo"))
+        val bold = saved.doc.spans.firstOrNull { it.type == SpanType.BOLD }
+        assertTrue("bold span saved: ${saved.doc.spans}", bold != null && saved.doc.text.substring(bold.start, bold.end).contains("fuerte"))
+    }
+
+    @Test
+    fun tabletLandscapeShowsFoldersListAndEditorSideBySide() {
+        runBlocking { container.speeches.create("Charla A", Markup.parse("Texto de A")) }
+        InstrumentationRegistry.getInstrumentation().uiAutomation.setRotation(UiAutomation.ROTATION_FREEZE_90)
+        waitForText("Charla A")
+        compose.waitForIdle()
+        compose.onRoot().printToLog("TALKS_TREE_TABLET")
+        Ascii.shot("tablet-landscape")
+        // Sidebar, list and (empty) editor are all visible at once.
+        compose.onNodeWithText("Nuevo discurso").assertExists()
+        compose.onNodeWithText("Papelera").assertExists()
+        compose.onNodeWithText("Elige un discurso").assertExists()
+        compose.onAllNodesWithText("Charla A")[0].performClick()
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+        Ascii.shot("tablet-landscape-editing")
+    }
+
+    @Test
+    fun talksModeFollowsASimulatedSpeakerFromStartToFinish() {
+        val fake = FakeEngine()
+        container.speechEngineFactory = { fake }
+        val practice = SampleContent.practice
+        runBlocking { container.speeches.create("Discurso de prueba", practice) }
+        waitForText("Discurso de prueba")
+        compose.onAllNodesWithText("Discurso de prueba")[0].performClick()
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+
+        compose.onNode(hasText("Talks") and hasClickAction()).performClick()
+        waitForText("COMENZAR")
+        Ascii.shot("talks-prepare")
+        compose.onRoot().printToLog("TALKS_TREE_PREPARE")
+        compose.onNodeWithText("COMENZAR").performClick()
+
+        // Nothing heard yet: listening, not yet following.
+        waitForText("Escuchando")
+        Ascii.shot("talks-listening")
+
+        // The speaker reads the first paragraph; the recogniser sends growing partial results.
+        val words = com.eliadca.talks.core.track.ScriptIndex.build(practice.text).tokens.map { it.norm }
+        var spoken = 0
+        while (spoken < 40) {
+            spoken += 4
+            fake.hear(words.take(spoken).joinToString(" "))
+            Thread.sleep(120)
+        }
+        waitForText("Siguiendo")
+        Ascii.shot("talks-following")
+        compose.onRoot().printToLog("TALKS_TREE_LIVE")
+
+        // The speaker improvises: the status says so and the place is kept.
+        fake.hear("como les decia ayer en la reunion con el equipo de ventas y los clientes del norte y la verdad es que si", final = true)
+        waitForText("Improvisando", timeoutMs = 10_000)
+        Ascii.shot("talks-improvising")
+
+        // And reads the rest of the speech to the very end.
+        fake.hear(words.drop(36).joinToString(" "), final = true)
+        waitForText("Fin del discurso", timeoutMs = 20_000)
+        Ascii.shot("talks-finished")
+
+        compose.onNodeWithText("Terminar y ver resumen").performClick()
+        waitForText("¿Terminar el modo Talks?")
+        compose.onNode(hasText("Terminar") and hasClickAction()).performClick()
+        waitForText("Sesión terminada")
+        Ascii.shot("talks-summary")
+    }
+}

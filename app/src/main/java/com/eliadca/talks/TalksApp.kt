@@ -3,9 +3,11 @@ package com.eliadca.talks
 import android.app.Application
 import android.content.Context
 import com.eliadca.talks.core.sample.SampleContent
+import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.data.SettingsRepository
 import com.eliadca.talks.data.SpeechRepository
 import com.eliadca.talks.data.db.TalksDatabase
+import com.eliadca.talks.speech.SpeechEngine
 import com.eliadca.talks.speech.VoskModelController
 import com.eliadca.talks.speech.VoskModelManager
 import kotlinx.coroutines.CoroutineScope
@@ -34,6 +36,10 @@ class AppContainer(private val context: Context) {
     val settings: SettingsRepository by lazy { SettingsRepository(context) }
     val speeches: SpeechRepository by lazy { SpeechRepository(database) }
     val voskModel: VoskModelController by lazy { VoskModelController(VoskModelManager(context), scope) }
+
+    /** Test hook: when set, Talks mode listens through this engine instead of the real recogniser. */
+    @Volatile
+    var speechEngineFactory: ((AppSettings) -> SpeechEngine)? = null
 
     fun startUp() {
         scope.launch {
