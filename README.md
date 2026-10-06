@@ -111,16 +111,21 @@ app/    Android: Compose (biblioteca, ajustes, modo Talks), editor basado en Edi
 - Hay un gancho de pruebas, `AppContainer.speechEngineFactory`, para inyectar un reconocedor falso.
 
 ### Qué está verificado y qué no
-Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 113 pruebas automáticas (50 del motor, 63 con Robolectric) más 5 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
+Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 119 pruebas automáticas (55 del motor, 64 con Robolectric) más 7 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
 
 - **Seguimiento de voz** (`:core:test`, simulador de orador con reconocimiento defectuoso): el marcador se mantiene en su sitio en >99,5 % de las lecturas sin errores,
   >97 % con un 6 % de palabras mal reconocidas y un 3 % perdidas, >90 % con un 15 % mal reconocidas, >92 % improvisando frases nuevas y >90 % si lo improvisado reutiliza palabras del guion.
   Tras saltarse o repetir frases, la mediana de recuperación es de 8 palabras o menos (percentil 90: 20 o menos). Con guiones de más de 9 000 palabras, cada actualización cuesta muy por debajo de 25 ms.
   También se prueba con frases repetidas (estribillos), reconocedores que solo entregan resultados finales, y la normalización del español (acentos, b/v, números…).
+- **Hablar de otra cosa** (`:core:test`, simulación con charla real en español sobre otros temas —el aeropuerto, el fútbol, el tráfico—, de 40 a 400 palabras):
+  el marcador se queda quieto donde dejaste el texto en ≥97 % de las digresiones (deriva máxima de 6–9 palabras; antes de esta versión, solo en el 4–9 % y podía
+  saltar cientos de palabras) y te vuelve a encontrar en 0–4 palabras cuando retomas el guion.
 - **Editor, lector y sesión de Talks** (Robolectric): formato, listas, deshacer/rehacer, buscar y reemplazar, el lector (resaltado, desplazamiento, actualizaciones desde otros hilos),
   la sesión de Talks con un motor de voz simulado (seguimiento, improvisación, pausa, reintento, avance automático), base de datos, copias de seguridad e importación de Word/Markdown.
-- **App real en un emulador de tablet** (Pixel Tablet, Android 14, 5 pruebas): abre la biblioteca, escribe y pone negrita en el editor real comprobando lo guardado,
-  muestra los tres paneles en horizontal, carga las librerías nativas de Vosk y recorre todo el modo Talks (preparación → «Escuchando» → «Siguiendo» → «Improvisando» → «Fin del discurso» → resumen).
+- **App real en un emulador de tablet** (Pixel Tablet, Android 14, 7 pruebas, con capturas de pantalla reales en cada ejecución): abre la biblioteca; escribe y pone negrita en el editor real
+  comprobando lo guardado; en horizontal muestra menú plegado, lista y editor, pliega la lista a pantalla completa y abre el menú completo; en vertical lista y editor se turnan
+  y **deslizar sobre el discurso no abre el menú lateral**; abre los ajustes desde el menú; carga las librerías nativas de Vosk; y recorre todo el modo Talks
+  (preparación → «Escuchando» → «Siguiendo» → **modo manual** → «Seguir con la voz desde aquí» → «Improvisando» → «Fin del discurso» → resumen).
 - **No verificable sin un dispositivo físico con micrófono**: la calidad real del reconocimiento del servicio de Android/Google o de Vosk en tu tablet y con tu micrófono
   (las pruebas usan un orador simulado, no audio real), el comportamiento exacto del S Pen y de los mandos Bluetooth concretos.
   Por eso el modo Talks incluye prueba de micrófono, respaldo manual y aviso de errores. **Ensaya con tu equipo antes de un acto importante.**

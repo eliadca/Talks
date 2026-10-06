@@ -350,13 +350,13 @@ class ReaderView(context: Context) : ScrollView(context) {
             val w = MeasureSpec.getSize(widthMeasureSpec)
             if (w != builtWidth || layout == null) {
                 val textWidth = max(100, (w - sideMargin - rightMargin).toInt())
-                // Long words at stage sizes are split with a hyphen, by Spanish rules, never cut bare.
+                // Whole words only: a word split across lines is harder to say aloud.
                 layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, textWidth)
                     .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                     .setLineSpacing(0f, cfg.lineSpacing)
                     .setIncludePad(false)
-                    .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
-                    .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
+                    .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                    .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
                     .build()
                 builtWidth = w
             }

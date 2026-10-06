@@ -1,5 +1,6 @@
 package com.eliadca.talks.ui.editor
 
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material.icons.filled.Check
@@ -91,7 +92,7 @@ fun FormatToolbar(c: EditorController, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            TextStyleMenu(f.block) { c.toggleBlock(it); c.focus() }
+            TextStyleMenu(f.block, onClear = { c.clearFormatting(); c.focus() }) { c.toggleBlock(it); c.focus() }
             ToolGroup {
                 ToolButton(Icons.Filled.FormatBold, "Negrita (Ctrl+B)", active = f.bold) { c.toggle(InlineKind.BOLD); c.focus() }
                 ToolButton(Icons.Filled.FormatItalic, "Cursiva (Ctrl+I)", active = f.italic) { c.toggle(InlineKind.ITALIC); c.focus() }
@@ -126,12 +127,7 @@ fun FormatToolbar(c: EditorController, modifier: Modifier = Modifier) {
                 ToolButton(Icons.AutoMirrored.Filled.FormatIndentDecrease, "Reducir sangría") { c.indent(-1); c.focus() }
                 ToolButton(Icons.AutoMirrored.Filled.FormatIndentIncrease, "Aumentar sangría") { c.indent(1); c.focus() }
             }
-            ToolGroup {
-                ToolButton(Icons.Filled.EditNote, "Nota para ti: se ve, pero no se espera que la digas", active = f.stage) {
-                    c.insertNote(); c.focus()
-                }
-                ToolButton(Icons.Filled.FormatClear, "Quitar formato") { c.clearFormatting(); c.focus() }
-            }
+            NoteButton(active = f.stage) { c.insertNote(); c.focus() }
         }
     }
 }
@@ -176,7 +172,7 @@ private fun AlignMenu(current: Align, onPick: (Align) -> Unit) {
 
 /** The paragraph style, shown by name: Texto, Título grande, Título, Subtítulo. */
 @Composable
-private fun TextStyleMenu(current: BlockType, onPick: (BlockType) -> Unit) {
+private fun TextStyleMenu(current: BlockType, onClear: () -> Unit, onPick: (BlockType) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     val label = when (current) {
@@ -191,12 +187,12 @@ private fun TextStyleMenu(current: BlockType, onPick: (BlockType) -> Unit) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(colors.surface)
                 .clickable(role = Role.Button, onClickLabel = "Estilo del párrafo") { open = true }
-                .padding(start = 12.dp, end = 6.dp, top = 11.dp, bottom = 11.dp),
+                .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Filled.Title, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.widthIn(min = 84.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.widthIn(min = 64.dp))
             Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = colors.onSurfaceVariant)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -226,7 +222,32 @@ private fun TextStyleMenu(current: BlockType, onPick: (BlockType) -> Unit) {
                     },
                 )
             }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Quitar formato") },
+                leadingIcon = { Icon(Icons.Filled.FormatClear, contentDescription = null) },
+                onClick = { open = false; onClear() },
+            )
         }
+    }
+}
+
+/** Notes for the speaker: the selection becomes one, or "[ ]" starts a new one at the cursor. */
+@Composable
+private fun NoteButton(active: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (active) colors.primaryContainer else colors.surface)
+            .semantics { contentDescription = "Nota para ti: se ve, pero no se espera que la digas" }
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.EditNote, contentDescription = null, tint = if (active) colors.onPrimaryContainer else colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("Nota", style = MaterialTheme.typography.labelLarge, color = if (active) colors.onPrimaryContainer else colors.onSurface)
     }
 }
 
@@ -246,14 +267,14 @@ fun ToolButton(
     }
     Box(
         Modifier
-            .size(38.dp)
+            .size(36.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(if (active) colors.primaryContainer else Color.Transparent)
             .semantics { contentDescription = description }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
 
