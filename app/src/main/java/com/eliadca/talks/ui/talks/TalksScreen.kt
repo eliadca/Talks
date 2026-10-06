@@ -340,6 +340,9 @@ fun TalksScreen(
                 LiveOverlay(
                     session = session,
                     targetMinutes = vm.speech?.targetMinutes ?: 0,
+                    totalSeconds = remember(doc, settings.wordsPerMinute, settings.readHeadings) {
+                        doc?.estimatedSeconds(settings.wordsPerMinute, settings.readHeadings) ?: 0
+                    },
                     palette = palette,
                     controlsVisible = controlsVisible,
                     following = following,
@@ -490,6 +493,7 @@ private class LiveActions(
 private fun LiveOverlay(
     session: TalksSession,
     targetMinutes: Int,
+    totalSeconds: Int,
     palette: ReaderPalette,
     controlsVisible: Boolean,
     following: Boolean,
@@ -502,7 +506,7 @@ private fun LiveOverlay(
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
         // Status: always visible, so the speaker can trust at a glance that the app is listening.
-        StatusPill(st, targetMinutes, palette, Modifier.align(Alignment.TopStart).padding(12.dp))
+        StatusPill(st, targetMinutes, totalSeconds, palette, Modifier.align(Alignment.TopStart).padding(12.dp))
 
         AnimatedVisibility(
             visible = controlsVisible,
@@ -813,7 +817,7 @@ private fun AutoSpeedBar(st: TalksSession.State, palette: ReaderPalette, a: Live
 }
 
 @Composable
-private fun StatusPill(st: TalksSession.State, targetMinutes: Int, palette: ReaderPalette, modifier: Modifier) {
+private fun StatusPill(st: TalksSession.State, targetMinutes: Int, totalSeconds: Int, palette: ReaderPalette, modifier: Modifier) {
     val ink = Color(palette.text)
     val (color, label) = when {
         st.manual -> Blue to "Manual"
@@ -845,6 +849,11 @@ private fun StatusPill(st: TalksSession.State, targetMinutes: Int, palette: Read
         }
         Text(label, color = ink.copy(alpha = 0.9f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
         Text(formatClock(st.elapsedMs), color = ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        if (totalSeconds > 0 && st.progress > 0.02f && !st.finished) {
+            // What is left at the speaker's usual pace.
+            val left = (totalSeconds * (1f - st.progress)).toLong().coerceAtLeast(0)
+            Text("quedan ${formatClock(left * 1000)}", color = ink.copy(alpha = 0.7f), fontSize = 14.sp)
+        }
         if (targetMinutes > 0 && st.progress > 0.03f) {
             // Seconds ahead of (+) or behind (-) the time planned for the part already read.
             val planned = st.progress * targetMinutes * 60

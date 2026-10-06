@@ -339,6 +339,7 @@ class ReaderView(context: Context) : ScrollView(context) {
             text = SpannableCodec.toSpannable(doc, style, withMarker = false)
             paint.color = cfg.palette.text
             paint.textSize = fontPx()
+            paint.textLocale = SPANISH
             paint.typeface = if (cfg.serif) Typeface.SERIF else Typeface.SANS_SERIF
             if (forceLayout) builtWidth = -1
             requestLayout()
@@ -349,12 +350,13 @@ class ReaderView(context: Context) : ScrollView(context) {
             val w = MeasureSpec.getSize(widthMeasureSpec)
             if (w != builtWidth || layout == null) {
                 val textWidth = max(100, (w - sideMargin - rightMargin).toInt())
+                // Long words at stage sizes are split with a hyphen, by Spanish rules, never cut bare.
                 layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, textWidth)
                     .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                     .setLineSpacing(0f, cfg.lineSpacing)
                     .setIncludePad(false)
-                    .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
-                    .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+                    .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
+                    .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
                     .build()
                 builtWidth = w
             }
@@ -468,5 +470,6 @@ class ReaderView(context: Context) : ScrollView(context) {
 
     private companion object {
         const val RESUME_FOLLOW_MS = 7_000L
+        val SPANISH: java.util.Locale = java.util.Locale.forLanguageTag("es-ES")
     }
 }
