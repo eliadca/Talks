@@ -1,6 +1,8 @@
 package com.eliadca.talks.speech
 
 import com.eliadca.talks.core.sample.SampleContent
+import com.eliadca.talks.core.track.MarkUnit
+import com.eliadca.talks.core.track.Marking
 import com.eliadca.talks.core.track.ScriptIndex
 import com.eliadca.talks.core.track.TrackStatus
 import com.eliadca.talks.core.doc.silentRanges
@@ -53,7 +55,7 @@ class TalksSessionTest {
         val doc = SampleContent.practice
         index = ScriptIndex.build(doc.text, doc.silentRanges(readHeadings = false))
         // Robolectric's platform clock does not advance by itself, so the session gets a real one.
-        session = TalksSession(scope, index, engine, highlightWords = 9, now = { System.nanoTime() / 1_000_000 })
+        session = TalksSession(scope, index, engine, now = { System.nanoTime() / 1_000_000 })
     }
 
     @After
@@ -78,8 +80,12 @@ class TalksSessionTest {
 
         val st = session.state.value
         assertEquals(TrackStatus.FOLLOWING, st.status)
-        assertEquals(index.startChar(st.position), st.nextStart)
+        // The reading line follows the voice; the whole phrase being said is marked.
+        assertEquals(index.startChar(st.position), st.focus)
+        val phrase = index.blockStart(MarkUnit.PHRASE, st.position)
+        assertEquals(index.startChar(phrase), st.nextStart)
         assertEquals(st.nextStart, st.spokenEnd)
+        assertTrue(st.spokenEnd <= index.startChar(st.position))
         assertTrue(st.nextEnd > st.nextStart)
         assertTrue("next chunk is a phrase, not the rest of the speech", st.nextEnd - st.nextStart < 200)
         assertTrue(st.progress > 0f)
@@ -90,7 +96,7 @@ class TalksSessionTest {
         val start = index.size / 2
         session.start(start)
         waitFor("start position published") { session.state.value.position == start }
-        assertEquals(index.startChar(start), session.state.value.nextStart)
+        assertEquals(index.startChar(start), session.state.value.focus)
     }
 
     @Test fun manualPositionAndPhraseNudges() {
@@ -213,7 +219,7 @@ class TalksSessionTest {
         assertTrue(st.auto)
         assertFalse(st.listening)
         assertEquals(300, st.autoWpm)
-        assertEquals(index.startChar(st.position), st.nextStart)
+        assertEquals(index.startChar(st.position), st.focus)
 
         session.setAutoSpeed(1000)
         assertEquals("speed is capped", 300, session.state.value.autoWpm)
@@ -264,5 +270,62 @@ class TalksSessionTest {
         assertNotNull(summary.engineName)
         assertEquals(1, engine.stopped)
         assertFalse(session.state.value.listening)
+    }
+
+    @Test fun thePhraseStaysMarkedWhileItIsBeingSaid() {
+        session.start(0)
+        val words = index.tokens.take(3).map { it.norm }
+        engine.hear(words.take(2).joinToString(" "))
+        waitFor("second word") { session.state.value.position >= 2 }
+        val first = session.state.value
+        engine.hear(words.joinToString(" "))
+        waitFor("third word") { session.state.value.position >= 3 }
+        val third = session.state.value
+        // Same phrase ("Buenos días a todos."): the marks and the dimming do not move, only the focus.
+        assertEquals(first.marks, third.marks)
+        assertEquals(first.spokenEnd, third.spokenEnd)
+        assertTrue(third.focus > first.focus)
+    }
+
+    @Test fun marksNeverCoverNotesHeadingsOrLineBreaks() {
+        session.start(0)
+        for (unit in MarkUnit.entries) {
+            session.setMarking(Marking(unit))
+            for (p in listOf(0, 30, 37, 38, 100, 105, 107, 200, 300, index.size - 3)) {
+                session.setPosition(p)
+                waitFor("position $p with $unit") { session.state.value.position == p }
+                Thread.sleep(20)
+                for (m in session.state.value.marks) {
+                    val shown = index.text.substring(m.start, m.end)
+                    assertFalse("$unit at $p marks «$shown»", shown.contains('[') || shown.contains(']') || shown.contains('\n'))
+                }
+            }
+        }
+    }
+
+    @Test fun changingTheMarkingRepublishesWithoutAManualMove() {
+        session.start(0)
+        // Inside "Gracias por estar aquí," of a longer sentence, so phrase and sentence differ.
+        session.setPosition(5)
+        waitFor("manual move") { session.state.value.position == 5 }
+        val moves = session.state.value.manualMoves
+        val phraseMarks = session.state.value.marks
+        session.setMarking(Marking(MarkUnit.SENTENCE))
+        waitFor("sentence marking") { session.state.value.marks != phraseMarks }
+        assertEquals(moves, session.state.value.manualMoves)
+        session.setMarking(Marking(MarkUnit.NONE))
+        waitFor("no marking") { session.state.value.marks.isEmpty() }
+        assertEquals(index.startChar(5), session.state.value.focus)
+    }
+
+    @Test fun markingAheadShowsTheNextPhraseWithoutDimmingWhatIsNotSaid() {
+        session.start(0)
+        val second = index.nextBlockStart(MarkUnit.PHRASE, 0)
+        session.setPosition(second - 1) // about to say the last word of the first phrase
+        waitFor("position") { session.state.value.position == second - 1 }
+        session.setMarking(Marking(lead = 2))
+        waitFor("lead applied") { session.state.value.nextStart == index.startChar(second) }
+        val st = session.state.value
+        assertEquals(0, st.spokenEnd) // the first phrase is not dimmed yet
     }
 }

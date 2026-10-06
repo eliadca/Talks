@@ -114,6 +114,15 @@ import com.eliadca.talks.ui.formatClock
 import com.eliadca.talks.ui.home.formatDuration
 import com.eliadca.talks.ui.theme.TalksTheme
 import kotlinx.coroutines.delay
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.FormatUnderlined
+import com.eliadca.talks.core.track.CharSpan
+import com.eliadca.talks.core.track.MarkUnit
+import com.eliadca.talks.core.track.Marking
+import com.eliadca.talks.data.marking
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 private val Green = Color(0xFF2ECC71)
 private val Amber = Color(0xFFFFB300)
@@ -165,6 +174,8 @@ fun TalksScreen(
     var lastInteraction by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var following by remember { mutableStateOf(true) }
     var touchLocked by remember { mutableStateOf(false) }
+    /** The bar to choose how what comes next is marked, and how far ahead of the voice. */
+    var markingOpen by remember { mutableStateOf(false) }
     val readerRef = remember { mutableStateOf<ReaderView?>(null) }
 
     fun touch() {
@@ -205,18 +216,25 @@ fun TalksScreen(
     }
 
     BackHandler {
-        when (phase) {
-            TalksPhase.LIVE -> confirmExit = true
+        when {
+            markingOpen -> markingOpen = false
+            phase == TalksPhase.LIVE -> confirmExit = true
             else -> onExit()
         }
     }
 
-    // Controls fade out a few seconds after the last touch, once the talk is under way.
+    // Controls (and the marking bar) fade out a few seconds after the last touch, once the talk is under way.
     LaunchedEffect(phase, controlsVisible, lastInteraction) {
         if (phase == TalksPhase.LIVE && controlsVisible) {
             delay(CONTROLS_HIDE_MS)
             controlsVisible = false
+            markingOpen = false
         }
+    }
+
+    // The marking can change during the run, from the live bar or the settings.
+    LaunchedEffect(session, settings.markUnit, settings.markLead, settings.highlightWords) {
+        session?.setMarking(settings.marking())
     }
 
     // Steer the run with a presentation remote or the volume keys.
@@ -290,6 +308,7 @@ fun TalksScreen(
                             palette = palette,
                             anchor = settings.readerAnchor,
                             dimSpoken = settings.dimSpoken,
+                            guide = settings.markUnit == MarkUnit.NONE,
                         ),
                     )
                     reader.scaleX = if (settings.mirror) -1f else 1f
@@ -300,19 +319,23 @@ fun TalksScreen(
 
         // Feed the reader: the chosen start while preparing, the live position while running.
         val reader = readerRef.value
-        LaunchedEffect(reader, phase, vm.startToken, settings.highlightWords, index) {
+        LaunchedEffect(reader, phase, vm.startToken, settings.markUnit, settings.markLead, settings.highlightWords, index) {
             if (reader != null && index != null && (phase == TalksPhase.PREPARE || phase == TalksPhase.LOADING)) {
-                val (_, start, end) = vm.previewRanges(vm.startToken, settings.highlightWords)
-                reader.setProgress(0, start, end, jump = true)
+                val (focus, marks) = vm.preview(vm.startToken, settings.marking())
+                reader.setProgress(0, focus, marks, jump = true)
             }
         }
         LaunchedEffect(reader, session) {
             if (reader != null && session != null) {
                 reader.resumeFollow(animated = false)
-                session.state.collect { st ->
-                    reader.setManualMode(st.manual)
-                    reader.setProgress(st.spokenEnd, st.nextStart, st.nextEnd)
-                }
+                // Only what the reader shows; the clock and the microphone level change far more often.
+                session.state
+                    .map { ReaderFeed(it.manual, it.spokenEnd, it.focus, it.marks) }
+                    .distinctUntilChanged()
+                    .collect { f ->
+                        reader.setManualMode(f.manual)
+                        reader.setProgress(f.spokenEnd, f.focus, f.marks)
+                    }
             }
         }
 
@@ -348,6 +371,8 @@ fun TalksScreen(
                     following = following,
                     locked = touchLocked,
                     showHeard = settings.showHeard,
+                    marking = settings.marking(),
+                    markingOpen = markingOpen,
                     actions = LiveActions(
                         onToggleLock = { touchLocked = !touchLocked; controlsVisible = true; lastInteraction = System.currentTimeMillis() },
                         onFollow = { readerRef.value?.resumeFollow(); following = true; touch() },
@@ -371,6 +396,15 @@ fun TalksScreen(
                         },
                         onTheme = {
                             onChangeSettings { it.copy(readerTheme = nextTheme(it.readerTheme)) }
+                            touch()
+                        },
+                        onMarking = { markingOpen = !markingOpen; touch() },
+                        onMarkUnit = { unit ->
+                            onChangeSettings { it.copy(markUnit = unit) }
+                            touch()
+                        },
+                        onMarkLead = { delta ->
+                            onChangeSettings { it.copy(markLead = (it.markLead + delta).coerceIn(Marking.MIN_LEAD, Marking.MAX_LEAD)) }
                             touch()
                         },
                         onFinish = { confirmExit = true },
@@ -474,6 +508,9 @@ private fun ImmersiveAndAwake() {
 // Live
 // ==========================================================================================
 
+/** What the reader is given from the session; everything else in the state is for the overlay. */
+private data class ReaderFeed(val manual: Boolean, val spokenEnd: Int, val focus: Int, val marks: List<CharSpan>)
+
 /** What the live controls can do. */
 private class LiveActions(
     val onToggleLock: () -> Unit,
@@ -485,6 +522,9 @@ private class LiveActions(
     val onAutoSpeed: (Int) -> Unit,
     val onFont: (Int) -> Unit,
     val onTheme: () -> Unit,
+    val onMarking: () -> Unit,
+    val onMarkUnit: (MarkUnit) -> Unit,
+    val onMarkLead: (Int) -> Unit,
     val onFinish: () -> Unit,
     val onRetry: () -> Unit,
 )
@@ -499,6 +539,8 @@ private fun LiveOverlay(
     following: Boolean,
     locked: Boolean,
     showHeard: Boolean,
+    marking: Marking,
+    markingOpen: Boolean,
     actions: LiveActions,
 ) {
     val st by session.state.collectAsState()
@@ -514,7 +556,7 @@ private fun LiveOverlay(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
         ) {
-            ControlsBar(st, palette, locked, actions)
+            ControlsBar(st, palette, locked, markingOpen, actions)
         }
 
         // Problems with the recogniser.
@@ -571,6 +613,7 @@ private fun LiveOverlay(
         ) {
             when {
                 st.manual -> ManualBar(palette, actions.onFollowFromHere)
+                markingOpen -> MarkingBar(marking, palette, actions)
                 !following -> RecoverBar(palette, actions.onFollow, actions.onFollowFromHere)
                 st.auto -> AutoSpeedBar(st, palette, actions)
             }
@@ -599,7 +642,7 @@ private fun LiveOverlay(
 private fun contentOn(background: Color): Color = if (background.luminance() > 0.45f) Color.Black else Color.White
 
 @Composable
-private fun ControlsBar(st: TalksSession.State, palette: ReaderPalette, locked: Boolean, a: LiveActions) {
+private fun ControlsBar(st: TalksSession.State, palette: ReaderPalette, locked: Boolean, markingOpen: Boolean, a: LiveActions) {
     val ink = Color(palette.text)
     val accent = Color(palette.accent)
     Surface(
@@ -624,6 +667,7 @@ private fun ControlsBar(st: TalksSession.State, palette: ReaderPalette, locked: 
                     if (running) "Pausa" else "Seguir", ink, accent, active = !running,
                 ) { a.onPauseResume(st) }
                 BarButton(Icons.Filled.Speed, "Auto", ink, accent, active = st.auto) { a.onAuto(st) }
+                BarButton(Icons.Filled.FormatUnderlined, "Marcado", ink, accent, active = markingOpen) { a.onMarking() }
                 BarDivider(ink)
             }
             BarGlyphButton(15, "Letra −", ink) { a.onFont(-4) }
@@ -794,6 +838,93 @@ private fun RecoverBar(palette: ReaderPalette, onBack: () -> Unit, onHere: () ->
             Text("Seguir desde aquí", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
     }
+}
+
+/** How what comes next is marked, and how far ahead of (or behind) the voice. */
+@Composable
+private fun MarkingBar(marking: Marking, palette: ReaderPalette, a: LiveActions) {
+    val ink = Color(palette.text)
+    val accent = Color(palette.accent)
+    Surface(
+        Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp).widthIn(max = 940.dp),
+        shape = RoundedCornerShape(26.dp),
+        color = Color(palette.background).copy(alpha = 0.96f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.6f)),
+        shadowElevation = 10.dp,
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Filled.FormatUnderlined, null, tint = accent, modifier = Modifier.size(24.dp))
+                for ((unit, label) in MARK_UNITS) {
+                    val selected = marking.unit == unit
+                    Text(
+                        label,
+                        color = if (selected) contentOn(accent) else ink,
+                        fontSize = 16.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (selected) accent else ink.copy(alpha = 0.08f))
+                            .clickable(onClickLabel = label) { a.onMarkUnit(unit) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = { a.onMarkLead(-1) },
+                    enabled = marking.lead > Marking.MIN_LEAD,
+                    border = BorderStroke(1.dp, ink.copy(alpha = 0.35f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ink),
+                ) {
+                    Icon(Icons.Filled.ChevronLeft, null)
+                    Text("Atrasar", fontSize = 16.sp)
+                }
+                Text(
+                    leadLabel(marking.lead),
+                    color = ink,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                )
+                OutlinedButton(
+                    onClick = { a.onMarkLead(1) },
+                    enabled = marking.lead < Marking.MAX_LEAD,
+                    border = BorderStroke(1.dp, ink.copy(alpha = 0.35f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ink),
+                ) {
+                    Text("Adelantar", fontSize = 16.sp)
+                    Icon(Icons.Filled.ChevronRight, null)
+                }
+                Spacer(Modifier.size(12.dp))
+                Button(
+                    onClick = a.onMarking,
+                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = contentOn(accent)),
+                ) { Text("Listo", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+            }
+        }
+    }
+}
+
+private val MARK_UNITS = listOf(
+    MarkUnit.PHRASE to "Frase",
+    MarkUnit.SENTENCE to "Oración",
+    MarkUnit.WORD to "Palabra a palabra",
+    MarkUnit.NONE to "Sin marcar",
+)
+
+/** "Al ritmo de tu voz", "1 palabra por delante", "2 palabras por detrás"... */
+private fun leadLabel(lead: Int): String = when {
+    lead == 0 -> "Al ritmo de tu voz"
+    lead == 1 -> "1 palabra por delante"
+    lead > 1 -> "$lead palabras por delante"
+    lead == -1 -> "1 palabra por detrás"
+    else -> "${-lead} palabras por detrás"
 }
 
 @Composable

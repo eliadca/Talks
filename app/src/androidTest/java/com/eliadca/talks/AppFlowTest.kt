@@ -407,6 +407,19 @@ class AppFlowTest {
         Shots.take("talks-following")
         compose.onRoot().printToLog("TALKS_TREE_LIVE")
 
+        // How the text is marked: whole sentences, one word ahead of the voice.
+        if (compose.onAllNodes(hasText("Marcado") and hasClickAction()).fetchSemanticsNodes().isEmpty()) {
+            onView(isAssignableFrom(ReaderView::class.java)).perform(click()) // a tap shows the controls
+        }
+        clickVisible("Marcado")
+        waitForText("Al ritmo de tu voz")
+        clickVisible("Oración")
+        clickVisible("Adelantar")
+        waitForText("1 palabra por delante")
+        Thread.sleep(500)
+        Shots.take("talks-marking")
+        clickVisible("Listo")
+
         // Something goes badly wrong: the speaker turns everything automatic off and scrolls by hand.
         if (compose.onAllNodes(hasText("Manual") and hasClickAction()).fetchSemanticsNodes().isEmpty()) {
             onView(isAssignableFrom(ReaderView::class.java)).perform(click()) // a tap shows the controls

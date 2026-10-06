@@ -3,10 +3,12 @@ package com.eliadca.talks.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.Looper
 import android.view.View
 import androidx.test.core.app.ApplicationProvider
 import com.eliadca.talks.core.doc.Markup
 import com.eliadca.talks.core.sample.SampleContent
+import com.eliadca.talks.core.track.CharSpan
 import com.eliadca.talks.data.ReaderTheme
 import com.eliadca.talks.ui.talks.ReaderConfig
 import com.eliadca.talks.ui.talks.ReaderPalette
@@ -17,8 +19,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -107,5 +111,46 @@ class ReaderViewTest {
         assertFalse(r.autoFollow)
         r.resumeFollow(animated = false)
         assertTrue(r.autoFollow)
+    }
+
+    @Test fun repeatingTheSameProgressLetsTheGlideFinish() {
+        val r = reader()
+        val offset = SampleContent.practice.text.indexOf("Hace algunos años")
+        val marks = listOf(CharSpan(offset, offset + 40))
+        r.setProgress(offset, offset, marks) // a glide starts
+        // The session republishes every clock tick; the glide must not restart or stop short.
+        repeat(20) {
+            r.setProgress(offset, offset, marks)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(30))
+        }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        val jumped = reader().apply { setProgress(offset, offset, marks, jump = true) }
+        assertTrue(jumped.scrollY > 0)
+        assertEquals(jumped.scrollY, r.scrollY)
+    }
+
+    @Test fun onlyTheMarkedWordsGetTheAccentAndTheReadingLineCanShowAlone() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val doc = Markup.parse("Uno dos tres [una nota] cuatro cinco.\nSeis siete ocho.")
+        val text = doc.text
+        val palette = ReaderPalette.of(ReaderTheme.NIGHT)
+        fun accentPixels(marks: List<CharSpan>, guide: Boolean): Int {
+            val r = ReaderView(ctx).apply {
+                setDocument(doc)
+                configure(ReaderConfig(40f, 1.35f, false, palette, 0.35f, true, guide = guide))
+                measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
+                layout(0, 0, 1200, 800)
+            }
+            r.setProgress(0, 0, marks, jump = true)
+            val bmp = Bitmap.createBitmap(1200, 800, Bitmap.Config.ARGB_8888)
+            r.draw(Canvas(bmp))
+            val px = IntArray(1200 * 800)
+            bmp.getPixels(px, 0, 1200, 0, 0, 1200, 800)
+            return px.count { it == palette.accent }
+        }
+        val marks = listOf(CharSpan(0, text.indexOf(" [")), CharSpan(text.indexOf("cuatro"), text.indexOf("cinco") + 5))
+        assertTrue("marked words are underlined", accentPixels(marks, guide = false) > 0)
+        assertEquals("nothing marked, nothing underlined", 0, accentPixels(emptyList(), guide = false))
+        assertTrue("the reading line shows without marks", accentPixels(emptyList(), guide = true) > 0)
     }
 }

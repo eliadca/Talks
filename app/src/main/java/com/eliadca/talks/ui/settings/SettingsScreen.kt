@@ -54,6 +54,8 @@ import com.eliadca.talks.data.ReaderTheme
 import com.eliadca.talks.data.SPANISH_VARIANTS
 import com.eliadca.talks.data.ThemeMode
 import kotlin.math.roundToInt
+import com.eliadca.talks.core.track.Marking
+import com.eliadca.talks.core.track.MarkUnit
 
 @Composable
 fun SettingsScreen(
@@ -137,8 +139,28 @@ fun SettingsScreen(
                     SliderRow("Posición de la línea actual", settings.readerAnchor, 0.15f..0.65f, "${(settings.readerAnchor * 100).roundToInt()} % desde arriba") { v ->
                         onChange { it.copy(readerAnchor = (v * 20).roundToInt() / 20f) }
                     }
-                    SliderRow("Palabras subrayadas como «lo siguiente»", settings.highlightWords.toFloat(), 3f..20f, "${settings.highlightWords}") { v ->
-                        onChange { it.copy(highlightWords = v.roundToInt()) }
+                    ChoiceRow(
+                        "Cómo marcar lo que viene", markUnitLabel(settings.markUnit),
+                        listOf(
+                            MarkUnit.PHRASE to "Frase entera: queda quieta hasta que la terminas",
+                            MarkUnit.SENTENCE to "Oración entera: bloques más largos",
+                            MarkUnit.WORD to "Palabra a palabra",
+                            MarkUnit.NONE to "Sin marcar: solo la línea de lectura",
+                        ),
+                        settings.markUnit,
+                    ) { v -> onChange { it.copy(markUnit = v) } }
+                    SliderRow(
+                        "Adelanto del marcado", settings.markLead.toFloat(), Marking.MIN_LEAD.toFloat()..Marking.MAX_LEAD.toFloat(),
+                        when {
+                            settings.markLead == 0 -> "Al ritmo de tu voz"
+                            settings.markLead > 0 -> "${settings.markLead} ${if (settings.markLead == 1) "palabra" else "palabras"} por delante"
+                            else -> "${-settings.markLead} ${if (settings.markLead == -1) "palabra" else "palabras"} por detrás"
+                        },
+                    ) { v -> onChange { it.copy(markLead = v.roundToInt().coerceIn(Marking.MIN_LEAD, Marking.MAX_LEAD)) } }
+                    if (settings.markUnit == MarkUnit.WORD) {
+                        SliderRow("Palabras marcadas a la vez", settings.highlightWords.toFloat(), 3f..20f, "${settings.highlightWords}") { v ->
+                            onChange { it.copy(highlightWords = v.roundToInt()) }
+                        }
                     }
                     ChoiceRow(
                         "Colores", readerThemeLabel(settings.readerTheme),
@@ -187,6 +209,13 @@ private fun themeLabel(m: ThemeMode) = when (m) {
 private fun engineLabel(e: EngineKind) = when (e) {
     EngineKind.ANDROID -> "Servicio de voz de Android (Google)"
     EngineKind.VOSK -> "Sin conexión (Vosk)"
+}
+
+private fun markUnitLabel(u: MarkUnit): String = when (u) {
+    MarkUnit.PHRASE -> "Frase entera (recomendado)"
+    MarkUnit.SENTENCE -> "Oración entera"
+    MarkUnit.WORD -> "Palabra a palabra"
+    MarkUnit.NONE -> "Sin marcar"
 }
 
 private fun readerThemeLabel(t: ReaderTheme) = when (t) {

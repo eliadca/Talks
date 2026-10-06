@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.eliadca.talks.core.track.MarkUnit
+import com.eliadca.talks.core.track.Marking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -41,8 +43,12 @@ data class AppSettings(
     val readerLineSpacing: Float = 1.35f,
     /** Vertical position of the line being read, as a fraction of the screen height. */
     val readerAnchor: Float = 0.35f,
-    /** Longest stretch (in words) that is underlined as "what to say next". */
+    /** Longest stretch (in words) that is underlined as "what to say next" when marking word by word. */
     val highlightWords: Int = 9,
+    /** How what comes next is marked: whole phrases (the calmest), sentences, word by word, or not at all. */
+    val markUnit: MarkUnit = MarkUnit.PHRASE,
+    /** Words the marking runs ahead of the voice (negative: behind it). */
+    val markLead: Int = 0,
     val readHeadings: Boolean = false,
     val mirror: Boolean = false,
     val showHeard: Boolean = false,
@@ -57,6 +63,9 @@ data class AppSettings(
     /** The note with the template for an AI assistant has been added (once, also on older installs). */
     val templateSeeded: Boolean = false,
 )
+
+/** The marking of the live reader, as chosen in the settings. */
+fun AppSettings.marking(): Marking = Marking(markUnit, markLead, highlightWords)
 
 /** Spanish variants offered for recognition: tag to display name. */
 val SPANISH_VARIANTS: List<Pair<String, String>> = listOf(
@@ -101,6 +110,8 @@ class SettingsRepository(private val context: Context) {
         val readerLineSpacing = floatPreferencesKey("readerLineSpacing")
         val readerAnchor = floatPreferencesKey("readerAnchor")
         val highlightWords = intPreferencesKey("highlightWords")
+        val markUnit = stringPreferencesKey("markUnit")
+        val markLead = intPreferencesKey("markLead")
         val readHeadings = booleanPreferencesKey("readHeadings")
         val mirror = booleanPreferencesKey("mirror")
         val showHeard = booleanPreferencesKey("showHeard")
@@ -134,6 +145,8 @@ class SettingsRepository(private val context: Context) {
             readerLineSpacing = (p[K.readerLineSpacing] ?: d.readerLineSpacing).coerceIn(1.0f, 2.0f),
             readerAnchor = (p[K.readerAnchor] ?: d.readerAnchor).coerceIn(0.15f, 0.7f),
             highlightWords = (p[K.highlightWords] ?: d.highlightWords).coerceIn(3, 20),
+            markUnit = p[K.markUnit].toEnum(d.markUnit),
+            markLead = (p[K.markLead] ?: d.markLead).coerceIn(Marking.MIN_LEAD, Marking.MAX_LEAD),
             readHeadings = p[K.readHeadings] ?: d.readHeadings,
             mirror = p[K.mirror] ?: d.mirror,
             showHeard = p[K.showHeard] ?: d.showHeard,
@@ -163,6 +176,8 @@ class SettingsRepository(private val context: Context) {
             p[K.readerLineSpacing] = s.readerLineSpacing
             p[K.readerAnchor] = s.readerAnchor
             p[K.highlightWords] = s.highlightWords
+            p[K.markUnit] = s.markUnit.name
+            p[K.markLead] = s.markLead.coerceIn(Marking.MIN_LEAD, Marking.MAX_LEAD)
             p[K.readHeadings] = s.readHeadings
             p[K.mirror] = s.mirror
             p[K.showHeard] = s.showHeard

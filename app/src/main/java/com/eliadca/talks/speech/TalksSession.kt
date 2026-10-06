@@ -1,6 +1,9 @@
 package com.eliadca.talks.speech
 
 import android.os.SystemClock
+import com.eliadca.talks.core.track.CharSpan
+import com.eliadca.talks.core.track.MarkUnit
+import com.eliadca.talks.core.track.Marking
 import com.eliadca.talks.core.track.ScriptIndex
 import com.eliadca.talks.core.track.SpeechTracker
 import com.eliadca.talks.core.track.TrackStatus
@@ -41,7 +44,8 @@ class TalksSession(
     private val scope: CoroutineScope,
     private val index: ScriptIndex,
     private val engine: SpeechEngine,
-    private val highlightWords: Int,
+    /** How what comes next is marked; can be changed during the run with [setMarking]. */
+    marking: Marking = Marking(),
     /** Monotonic milliseconds; replaceable so that tests do not depend on the platform clock. */
     private val now: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
@@ -61,10 +65,12 @@ class TalksSession(
         /** Whether the app is listening (false while paused or after a fatal error). */
         val listening: Boolean = false,
         val elapsedMs: Long = 0,
-        /** Text offsets for the reader: everything before [spokenEnd] is done, [nextStart, nextEnd) is what to say next. */
+        /** Text offset before which everything has been said (the reader dims it). */
         val spokenEnd: Int = 0,
-        val nextStart: Int = 0,
-        val nextEnd: Int = 0,
+        /** Text offset whose line the reader keeps at the reading line: where the voice is. */
+        val focus: Int = 0,
+        /** What to say next, as stretches of text that leave out notes, skipped headings and line breaks. */
+        val marks: List<CharSpan> = emptyList(),
         val progress: Float = 0f,
         /** Counts every manual move, so the screen can tell that the position jumped on purpose. */
         val manualMoves: Int = 0,
@@ -76,7 +82,17 @@ class TalksSession(
          * speaker scrolls by hand. The clock keeps running.
          */
         val manual: Boolean = false,
-    )
+    ) {
+        /** Where the marked text starts (the voice's place when nothing is marked). */
+        val nextStart: Int get() = marks.firstOrNull()?.start ?: focus
+
+        /** Where the marked text ends. */
+        val nextEnd: Int get() = marks.lastOrNull()?.end ?: focus
+    }
+
+    /** Read on the tracker's dispatcher, written from the screen. */
+    @Volatile
+    private var marking: Marking = marking
 
     private val mutableState = MutableStateFlow(State())
     val state: StateFlow<State> = mutableState.asStateFlow()
@@ -233,12 +249,20 @@ class TalksSession(
         }
     }
 
-    /** Moves by [phrases] phrases (negative goes back). */
+    /** Changes how what comes next is marked; the reader updates at once. */
+    fun setMarking(marking: Marking) {
+        if (marking == this.marking) return
+        this.marking = marking
+        scope.launch(trackerDispatcher) { publish(manual = false) }
+    }
+
+    /** Moves by [phrases] marked blocks (sentences when marking sentences, phrases otherwise; negative goes back). */
     fun nudge(phrases: Int) {
         scope.launch(trackerDispatcher) {
+            val unit = if (marking.unit == MarkUnit.SENTENCE) MarkUnit.SENTENCE else MarkUnit.PHRASE
             var p = tracker.state.position
             repeat(kotlin.math.abs(phrases)) {
-                p = if (phrases > 0) index.nextPhraseStart(p) else index.previousPhraseStart(p)
+                p = if (phrases > 0) index.nextBlockStart(unit, p) else index.previousBlockStart(unit, p)
             }
             tracker.setPosition(p)
             publish(manual = true)
@@ -297,9 +321,8 @@ class TalksSession(
         val t = tracker.state
         val pos = t.position
         if (pos > furthest) furthest = pos
-        val nextStart = index.startChar(pos)
-        val chunkEnd = index.chunkEnd(pos, MIN_HIGHLIGHT_WORDS, highlightWords)
-        val nextEnd = if (pos >= index.size) index.text.length else index.endChar(chunkEnd - 1)
+        val m = index.mark(pos, marking)
+        val marks = index.segments(m.from, m.until)
         mutableState.update {
             it.copy(
                 position = pos,
@@ -307,16 +330,12 @@ class TalksSession(
                 confidence = t.confidence,
                 finished = t.finished,
                 heard = heard ?: it.heard,
-                spokenEnd = nextStart,
-                nextStart = nextStart,
-                nextEnd = nextEnd,
+                spokenEnd = index.startChar(m.dimUntil),
+                focus = index.startChar(m.focus),
+                marks = marks,
                 progress = index.progress(pos),
                 manualMoves = if (manual) it.manualMoves + 1 else it.manualMoves,
             )
         }
-    }
-
-    private companion object {
-        const val MIN_HIGHLIGHT_WORDS = 3
     }
 }

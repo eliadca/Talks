@@ -10,10 +10,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.eliadca.talks.container
 import com.eliadca.talks.core.doc.silentRanges
+import com.eliadca.talks.core.track.CharSpan
+import com.eliadca.talks.core.track.Marking
 import com.eliadca.talks.core.track.ScriptIndex
 import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.data.EngineKind
 import com.eliadca.talks.data.LoadedSpeech
+import com.eliadca.talks.data.marking
 import com.eliadca.talks.data.db.TalkSessionEntity
 import com.eliadca.talks.speech.AndroidSpeechEngine
 import com.eliadca.talks.speech.EngineError
@@ -100,12 +103,11 @@ class TalksViewModel(private val app: Application) : AndroidViewModel(app) {
         startToken = 0
     }
 
-    /** Text offsets (spoken end, next start, next end) to show for a run that starts at [token]. */
-    fun previewRanges(token: Int, highlightWords: Int): Triple<Int, Int, Int> {
-        val ix = index ?: return Triple(0, 0, 0)
-        val start = ix.startChar(token)
-        val end = if (token >= ix.size) ix.text.length else ix.endChar(ix.chunkEnd(token, 3, highlightWords) - 1)
-        return Triple(start, start, end)
+    /** What the reader shows before a run that starts at [token]: the line to focus and the first marks. */
+    fun preview(token: Int, marking: Marking): Pair<Int, List<CharSpan>> {
+        val ix = index ?: return 0 to emptyList()
+        val m = ix.mark(token, marking)
+        return ix.startChar(m.focus) to ix.segments(m.from, m.until)
     }
 
     // --- engines --------------------------------------------------------------------------------
@@ -163,7 +165,7 @@ class TalksViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val s = container.settings.settings.first()
             val engine = createEngine(s)
-            val run = TalksSession(viewModelScope, ix, engine, s.highlightWords)
+            val run = TalksSession(viewModelScope, ix, engine, s.marking())
             session = run
             summary = null
             phase = TalksPhase.LIVE
