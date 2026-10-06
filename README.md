@@ -51,6 +51,7 @@ El APK se compila automáticamente en GitHub Actions en cada cambio:
 
 1. En GitHub, abre la pestaña **Actions** → el último *Android CI* en verde → sección **Artifacts** → descarga **`talks-apk`** (es un `.zip`).
 2. En la tablet, descomprímelo (Mis archivos lo hace) e instala **`app-release.apk`** (permite «instalar apps desconocidas» cuando lo pida).
+   Si prefieres una descarga directa sin entrar en *Actions*, crea una etiqueta de versión (`git tag v1.0.0 && git push origin v1.0.0`): el flujo publica el APK como *Release*.
 3. La primera vez que pulses **Comenzar** en el modo Talks, concede el permiso del micrófono.
 
 > **Las actualizaciones se instalan encima y conservan tus discursos**, porque todos los APK se firman con la misma clave (`app/talks-sideload.jks`).
@@ -74,6 +75,7 @@ La variante `app-debug.apk` se instala junto a la normal (otro nombre de paquete
 - Si ves el punto **ámbar** («Improvisando» / «Buscando»), no pasa nada: sigue hablando; en cuanto retomes el texto se recoloca.
 - Si el punto se pone **rojo**, la escucha se detuvo: sigue a mano (mantén pulsada una palabra) y pulsa **Reintentar** cuando puedas.
 - Un toque simple muestra/oculta los controles; se ocultan solos a los 5 s. Salir pide confirmación para evitar toques accidentales.
+- La primera vez que el modo Talks pasa a pantalla completa, Android muestra un aviso del sistema («Viendo en pantalla completa»): tócalo una vez al ensayar para que no aparezca el día del acto.
 
 ## Cómo sabe por dónde vas
 
@@ -98,12 +100,19 @@ app/    Android: Compose (biblioteca, ajustes, modo Talks), editor basado en Edi
 - Hay un gancho de pruebas, `AppContainer.speechEngineFactory`, para inyectar un reconocedor falso.
 
 ### Qué está verificado y qué no
-- **Verificado automáticamente**: el seguimiento de voz (precisión >99 % con ruido, recuperación media de 3 palabras tras un salto, ~0,5 ms por actualización
-  con un guion de 10 000 palabras), el modelo de documento, el editor (formato, listas, deshacer, buscar), el lector, la sesión de Talks, la base de datos, las copias de seguridad,
-  la importación de Word, y el recorrido completo de la interfaz en un emulador de tablet.
-- **No verificable sin un dispositivo físico con micrófono**: la calidad del reconocimiento de voz del servicio de Android/Google en tu tablet y con tu micrófono,
-  el comportamiento exacto del S Pen y de los mandos Bluetooth concretos. Por eso el modo Talks incluye prueba de micrófono, respaldo manual y aviso de errores.
-  **Ensaya con tu equipo antes de un acto importante.**
+Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 113 pruebas automáticas (50 del motor, 63 con Robolectric) más 5 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
+
+- **Seguimiento de voz** (`:core:test`, simulador de orador con reconocimiento defectuoso): el marcador se mantiene en su sitio en >99,5 % de las lecturas sin errores,
+  >97 % con un 6 % de palabras mal reconocidas y un 3 % perdidas, >90 % con un 15 % mal reconocidas, >92 % improvisando frases nuevas y >90 % si lo improvisado reutiliza palabras del guion.
+  Tras saltarse o repetir frases, la mediana de recuperación es de 8 palabras o menos (percentil 90: 20 o menos). Con guiones de más de 9 000 palabras, cada actualización cuesta muy por debajo de 25 ms.
+  También se prueba con frases repetidas (estribillos), reconocedores que solo entregan resultados finales, y la normalización del español (acentos, b/v, números…).
+- **Editor, lector y sesión de Talks** (Robolectric): formato, listas, deshacer/rehacer, buscar y reemplazar, el lector (resaltado, desplazamiento, actualizaciones desde otros hilos),
+  la sesión de Talks con un motor de voz simulado (seguimiento, improvisación, pausa, reintento, avance automático), base de datos, copias de seguridad e importación de Word/Markdown.
+- **App real en un emulador de tablet** (Pixel Tablet, Android 14, 5 pruebas): abre la biblioteca, escribe y pone negrita en el editor real comprobando lo guardado,
+  muestra los tres paneles en horizontal, carga las librerías nativas de Vosk y recorre todo el modo Talks (preparación → «Escuchando» → «Siguiendo» → «Improvisando» → «Fin del discurso» → resumen).
+- **No verificable sin un dispositivo físico con micrófono**: la calidad real del reconocimiento del servicio de Android/Google o de Vosk en tu tablet y con tu micrófono
+  (las pruebas usan un orador simulado, no audio real), el comportamiento exacto del S Pen y de los mandos Bluetooth concretos.
+  Por eso el modo Talks incluye prueba de micrófono, respaldo manual y aviso de errores. **Ensaya con tu equipo antes de un acto importante.**
 
 ## Privacidad
 
