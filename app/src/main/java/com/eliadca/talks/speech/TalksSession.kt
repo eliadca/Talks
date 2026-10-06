@@ -66,6 +66,9 @@ class TalksSession(
         val progress: Float = 0f,
         /** Counts every manual move, so the screen can tell that the position jumped on purpose. */
         val manualMoves: Int = 0,
+        /** True while the text advances by itself at [autoWpm] instead of following the voice. */
+        val auto: Boolean = false,
+        val autoWpm: Int = 130,
     )
 
     private val mutableState = MutableStateFlow(State())
@@ -77,6 +80,7 @@ class TalksSession(
 
     private var collectJob: Job? = null
     private var tickerJob: Job? = null
+    private var autoJob: Job? = null
 
     private var startedAtWall = 0L
     private var startPosition = 0
@@ -107,13 +111,61 @@ class TalksSession(
         engine.start()
     }
 
+    /**
+     * Teleprompter fallback: the text advances on its own at [wpm] words per minute and the
+     * recogniser is switched off. Handy when the microphone cannot be relied on.
+     */
+    fun startAuto(wpm: Int) {
+        val rate = wpm.coerceIn(40, 300)
+        autoJob?.cancel()
+        if (mutableState.value.listening) engine.stop()
+        if (activeSince == 0L) activeSince = SystemClock.elapsedRealtime()
+        mutableState.update { it.copy(auto = true, autoWpm = rate, listening = false, level = 0f, error = null) }
+        autoJob = scope.launch(trackerDispatcher) {
+            var carry = 0.0
+            var last = SystemClock.elapsedRealtime()
+            while (isActive) {
+                delay(100)
+                val now = SystemClock.elapsedRealtime()
+                carry += (now - last) * mutableState.value.autoWpm / 60_000.0
+                last = now
+                val whole = carry.toInt()
+                if (whole > 0) {
+                    carry -= whole
+                    val pos = tracker.state.position
+                    if (pos < index.size) {
+                        tracker.setPosition((pos + whole).coerceAtMost(index.size))
+                        publish(manual = false)
+                    }
+                }
+            }
+        }
+    }
+
+    fun setAutoSpeed(wpm: Int) {
+        mutableState.update { it.copy(autoWpm = wpm.coerceIn(40, 300)) }
+    }
+
+    /** Leaves automatic advance and goes back to listening. */
+    fun stopAuto() {
+        autoJob?.cancel()
+        autoJob = null
+        mutableState.update { it.copy(auto = false, listening = true, error = null) }
+        engine.start()
+    }
+
     /** Stops listening without ending the run (the clock stops too). */
     fun pause() {
-        if (!mutableState.value.listening) return
+        val wasAuto = mutableState.value.auto
+        if (wasAuto) {
+            autoJob?.cancel()
+            autoJob = null
+        }
+        if (!wasAuto && !mutableState.value.listening) return
         activeMs = currentActiveMs()
         activeSince = 0
-        engine.stop()
-        mutableState.update { it.copy(listening = false, level = 0f) }
+        if (!wasAuto) engine.stop() // in automatic mode the recogniser is already off
+        mutableState.update { it.copy(auto = false, listening = false, level = 0f) }
     }
 
     fun resume() {
@@ -156,6 +208,7 @@ class TalksSession(
         val total = currentActiveMs()
         collectJob?.cancel()
         tickerJob?.cancel()
+        autoJob?.cancel()
         engine.stop()
         mutableState.update { it.copy(listening = false, level = 0f) }
         return SessionSummary(startedAtWall, total, startPosition, furthest, index.size, engine.name)
@@ -165,6 +218,7 @@ class TalksSession(
     fun release() {
         collectJob?.cancel()
         tickerJob?.cancel()
+        autoJob?.cancel()
         engine.release()
     }
 

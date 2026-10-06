@@ -177,6 +177,52 @@ class TalksSessionTest {
         assertEquals(1f, session.state.value.progress, 0.001f)
     }
 
+    @Test fun automaticAdvanceMovesTheTextOnItsOwnAndStopsListening() {
+        session.start(0)
+        session.startAuto(300) // five words a second
+        assertEquals("the recogniser is switched off", 1, engine.stopped)
+        waitFor("automatic advance") { session.state.value.position >= 5 }
+        val st = session.state.value
+        assertTrue(st.auto)
+        assertFalse(st.listening)
+        assertEquals(300, st.autoWpm)
+        assertEquals(index.startChar(st.position), st.nextStart)
+
+        session.setAutoSpeed(1000)
+        assertEquals("speed is capped", 300, session.state.value.autoWpm)
+
+        session.stopAuto()
+        assertFalse(session.state.value.auto)
+        assertTrue(session.state.value.listening)
+        assertEquals(2, engine.started)
+        val p = session.state.value.position
+        Thread.sleep(500)
+        assertEquals("no longer advancing by itself", p, session.state.value.position)
+    }
+
+    @Test fun pausingDuringAutomaticAdvanceStopsEverything() {
+        session.start(0)
+        session.startAuto(300)
+        waitFor("some advance") { session.state.value.position >= 2 }
+        session.pause()
+        assertFalse(session.state.value.auto)
+        assertFalse(session.state.value.listening)
+        val p = session.state.value.position
+        val t = session.state.value.elapsedMs
+        Thread.sleep(600)
+        assertEquals(p, session.state.value.position)
+        assertEquals("clock stopped", t, session.state.value.elapsedMs)
+        session.resume()
+        assertTrue(session.state.value.listening)
+    }
+
+    @Test fun automaticAdvanceStopsAtTheEnd() {
+        session.start(index.size - 3)
+        session.startAuto(300)
+        waitFor("finished") { session.state.value.finished }
+        assertEquals(index.size, session.state.value.position)
+    }
+
     @Test fun stopReturnsASummaryOfWhatWasCovered() {
         session.start(0)
         engine.hear("buenos dias a todos gracias por estar aqui y gracias por regalarme lo mas valioso que tienen su tiempo")

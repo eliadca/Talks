@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.time.Duration
 
 plugins {
     alias(libs.plugins.android.application)
@@ -140,7 +141,7 @@ dependencies {
 
 // A hung unit test must not hold the build for ever: stop after a while and report which test was running.
 tasks.withType<Test>().configureEach {
-    timeout.set(java.time.Duration.ofMinutes(12))
+    timeout.set(Duration.ofMinutes(12))
     testLogging {
         events("started", "failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

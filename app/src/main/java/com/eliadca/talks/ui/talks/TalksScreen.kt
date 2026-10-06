@@ -12,6 +12,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,9 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
@@ -105,6 +109,7 @@ private val Green = Color(0xFF2ECC71)
 private val Amber = Color(0xFFFFB300)
 private val Red = Color(0xFFFF5252)
 private val Gray = Color(0xFF8E8E93)
+private val Blue = Color(0xFF4FA3FF)
 
 @Composable
 fun TalksScreen(
@@ -149,6 +154,7 @@ fun TalksScreen(
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInteraction by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var following by remember { mutableStateOf(true) }
+    var touchLocked by remember { mutableStateOf(false) }
     val readerRef = remember { mutableStateOf<ReaderView?>(null) }
 
     fun touch() {
@@ -184,7 +190,7 @@ fun TalksScreen(
     val longPressHandler = rememberUpdatedState<(Int) -> Unit>(
         { offset ->
             val ix = vm.index
-            if (ix != null) {
+            if (ix != null && !(touchLocked && vm.phase == TalksPhase.LIVE)) {
                 when (vm.phase) {
                     TalksPhase.LIVE -> vm.session?.setPosition(ix.tokenAtChar(offset))
                     TalksPhase.PREPARE -> vm.setStartFromOffset(offset)
@@ -196,7 +202,7 @@ fun TalksScreen(
     )
     val tapHandler = rememberUpdatedState<() -> Unit>(
         {
-            if (vm.phase == TalksPhase.LIVE) {
+            if (vm.phase == TalksPhase.LIVE && !touchLocked) {
                 controlsVisible = !controlsVisible
                 lastInteraction = System.currentTimeMillis()
             }
@@ -283,10 +289,20 @@ fun TalksScreen(
                     settings = settings,
                     controlsVisible = controlsVisible,
                     following = following,
+                    locked = touchLocked,
+                    onToggleLock = { touchLocked = !touchLocked; controlsVisible = true; lastInteraction = System.currentTimeMillis() },
                     showHeard = settings.showHeard,
                     onFollow = { readerRef.value?.resumeFollow(); following = true },
                     onPauseResume = { st ->
-                        if (st.listening) session.pause() else session.resume()
+                        if (st.listening || st.auto) session.pause() else session.resume()
+                        touch()
+                    },
+                    onAuto = { st ->
+                        if (st.auto) session.stopAuto() else session.startAuto(settings.wordsPerMinute)
+                        touch()
+                    },
+                    onAutoSpeed = { delta ->
+                        session.setAutoSpeed(session.state.value.autoWpm + delta)
                         touch()
                     },
                     onFont = { delta ->
@@ -386,9 +402,13 @@ private fun LiveOverlay(
     settings: AppSettings,
     controlsVisible: Boolean,
     following: Boolean,
+    locked: Boolean,
+    onToggleLock: () -> Unit,
     showHeard: Boolean,
     onFollow: () -> Unit,
     onPauseResume: (TalksSession.State) -> Unit,
+    onAuto: (TalksSession.State) -> Unit,
+    onAutoSpeed: (Int) -> Unit,
     onFont: (Int) -> Unit,
     onTheme: () -> Unit,
     onFinish: () -> Unit,
@@ -408,15 +428,17 @@ private fun LiveOverlay(
             modifier = Modifier.align(Alignment.TopEnd),
         ) {
             Row(
-                Modifier.padding(12.dp),
+                Modifier.padding(12.dp).horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ControlButton(
-                    if (st.listening) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    if (st.listening) "Pausar escucha" else "Reanudar escucha",
-                    ink, highlighted = !st.listening,
+                    if (st.listening || st.auto) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    if (st.listening || st.auto) "Pausar" else "Reanudar escucha",
+                    ink, highlighted = !st.listening && !st.auto,
                 ) { onPauseResume(st) }
+                ControlButton(Icons.Filled.FastForward, if (st.auto) "Volver a escuchar" else "Avance automático", ink, highlighted = st.auto) { onAuto(st) }
+                ControlButton(if (locked) Icons.Filled.Lock else Icons.Filled.LockOpen, if (locked) "Desbloquear toques" else "Bloquear toques", ink, highlighted = locked) { onToggleLock() }
                 TextControl("A−", ink) { onFont(-4) }
                 TextControl("A+", ink) { onFont(4) }
                 TextControl("◐", ink) { onTheme() }
@@ -464,6 +486,20 @@ private fun LiveOverlay(
         }
 
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (st.auto) {
+                Surface(
+                    Modifier.padding(bottom = 14.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color(0xFF1B3A5C),
+                ) {
+                    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { onAutoSpeed(-10) }) { Text("−10", color = Color.White, fontSize = 20.sp) }
+                        Text("${st.autoWpm} palabras/min", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        TextButton(onClick = { onAutoSpeed(10) }) { Text("+10", color = Color.White, fontSize = 20.sp) }
+                        TextButton(onClick = { onAuto(st) }) { Text("Volver a escuchar", color = Color(0xFF9CD0FF), fontSize = 16.sp) }
+                    }
+                }
+            }
             if (!following) {
                 Button(
                     onClick = onFollow,
@@ -500,6 +536,7 @@ private fun LiveOverlay(
 private fun StatusPill(st: TalksSession.State, targetMinutes: Int, palette: ReaderPalette, modifier: Modifier) {
     val ink = Color(palette.text)
     val (color, label) = when {
+        st.auto -> Blue to "Avance automático"
         st.error?.fatal == true -> Red to "Sin escucha"
         !st.listening -> Gray to "En pausa"
         st.error != null -> Amber to "Reconectando"
