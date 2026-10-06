@@ -1,0 +1,829 @@
+package com.eliadca.talks.ui.talks
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.speech.SpeechRecognizer
+import android.view.KeyEvent
+import android.view.WindowManager
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.eliadca.talks.MainActivity
+import com.eliadca.talks.core.doc.estimatedSeconds
+import com.eliadca.talks.core.track.TrackStatus
+import com.eliadca.talks.data.AppSettings
+import com.eliadca.talks.data.EngineKind
+import com.eliadca.talks.data.ReaderTheme
+import com.eliadca.talks.speech.EngineState
+import com.eliadca.talks.speech.ModelDownload
+import com.eliadca.talks.speech.TalksSession
+import com.eliadca.talks.ui.findActivity
+import com.eliadca.talks.ui.formatClock
+import com.eliadca.talks.ui.home.formatDuration
+import kotlinx.coroutines.delay
+
+private val Green = Color(0xFF2ECC71)
+private val Amber = Color(0xFFFFB300)
+private val Red = Color(0xFFFF5252)
+private val Gray = Color(0xFF8E8E93)
+
+@Composable
+fun TalksScreen(
+    speechId: Long,
+    settings: AppSettings,
+    onChangeSettings: ((AppSettings) -> AppSettings) -> Unit,
+    onExit: () -> Unit,
+) {
+    val vm: TalksViewModel = viewModel()
+    val context = LocalContext.current
+    val activity = context.findActivity() as? MainActivity
+
+    LaunchedEffect(speechId) { vm.load(speechId, settings) }
+    LaunchedEffect(settings.readHeadings) { vm.refreshIndex(settings.readHeadings) }
+
+    val phase = vm.phase
+    val index = vm.index
+    val session = vm.session
+    val doc = vm.speech?.doc
+    val palette = remember(settings.readerTheme) { ReaderPalette.of(settings.readerTheme) }
+
+    var hasMic by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        hasMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
+    // Never keep listening in the background (and never leave the media volume muted).
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        vm.stopTest()
+        vm.session?.pause()
+    }
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> hasMic = granted }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.importVoskModel(uri)
+    }
+
+    ImmersiveAndAwake()
+
+    var confirmExit by remember { mutableStateOf(false) }
+    var controlsVisible by remember { mutableStateOf(true) }
+    var lastInteraction by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var following by remember { mutableStateOf(true) }
+    val readerRef = remember { mutableStateOf<ReaderView?>(null) }
+
+    fun touch() {
+        lastInteraction = System.currentTimeMillis()
+        controlsVisible = true
+    }
+
+    BackHandler {
+        when (phase) {
+            TalksPhase.LIVE -> confirmExit = true
+            else -> onExit()
+        }
+    }
+
+    // Controls fade out a few seconds after the last touch, once the talk is under way.
+    LaunchedEffect(phase, controlsVisible, lastInteraction) {
+        if (phase == TalksPhase.LIVE && controlsVisible) {
+            delay(CONTROLS_HIDE_MS)
+            controlsVisible = false
+        }
+    }
+
+    // Steer the run with a presentation remote or the volume keys.
+    val currentSession by rememberUpdatedState(session)
+    val keyHandler = rememberUpdatedState<(KeyEvent) -> Boolean>(
+        { ev -> handleKey(ev, vm.phase, currentSession, settings.volumeKeys) { touch() } },
+    )
+    DisposableEffect(activity) {
+        activity?.talksKeyHandler = { ev -> keyHandler.value(ev) }
+        onDispose { activity?.talksKeyHandler = null }
+    }
+
+    val longPressHandler = rememberUpdatedState<(Int) -> Unit>(
+        { offset ->
+            val ix = vm.index
+            if (ix != null) {
+                when (vm.phase) {
+                    TalksPhase.LIVE -> vm.session?.setPosition(ix.tokenAtChar(offset))
+                    TalksPhase.PREPARE -> vm.setStartFromOffset(offset)
+                    else -> {}
+                }
+            }
+            touch()
+        },
+    )
+    val tapHandler = rememberUpdatedState<() -> Unit>(
+        {
+            if (vm.phase == TalksPhase.LIVE) {
+                controlsVisible = !controlsVisible
+                lastInteraction = System.currentTimeMillis()
+            }
+        },
+    )
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(palette.background)),
+    ) {
+        if (doc != null) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    ReaderView(ctx).apply {
+                        setDocument(doc)
+                        listener = object : ReaderView.Listener {
+                            override fun onLongPress(offset: Int) = longPressHandler.value(offset)
+                            override fun onTap() = tapHandler.value()
+                            override fun onUserScroll() { following = false }
+                            override fun onFollowResumed() { following = true }
+                        }
+                        readerRef.value = this
+                    }
+                },
+                update = { reader ->
+                    reader.configure(
+                        ReaderConfig(
+                            fontSp = settings.readerFontSp.toFloat(),
+                            lineSpacing = settings.readerLineSpacing,
+                            serif = settings.readerFont == com.eliadca.talks.data.ReaderFont.SERIF,
+                            palette = palette,
+                            anchor = settings.readerAnchor,
+                            dimSpoken = settings.dimSpoken,
+                        ),
+                    )
+                    reader.scaleX = if (settings.mirror) -1f else 1f
+                },
+                onRelease = { readerRef.value = null },
+            )
+        }
+
+        // Feed the reader: the chosen start while preparing, the live position while running.
+        val reader = readerRef.value
+        LaunchedEffect(reader, phase, vm.startToken, settings.highlightWords, index) {
+            if (reader != null && index != null && (phase == TalksPhase.PREPARE || phase == TalksPhase.LOADING)) {
+                val (_, start, end) = vm.previewRanges(vm.startToken, settings.highlightWords)
+                reader.setProgress(0, start, end, jump = true)
+            }
+        }
+        LaunchedEffect(reader, session) {
+            if (reader != null && session != null) {
+                reader.resumeFollow(animated = false)
+                session.state.collect { st -> reader.setProgress(st.spokenEnd, st.nextStart, st.nextEnd) }
+            }
+        }
+
+        when (phase) {
+            TalksPhase.LOADING -> Text(
+                "Cargando…",
+                color = Color(palette.text),
+                modifier = Modifier.align(Alignment.Center),
+            )
+            TalksPhase.PREPARE -> PreparePanel(
+                vm = vm,
+                settings = settings,
+                hasMic = hasMic,
+                onRequestMic = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                onImportModel = { importLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+                onChangeSettings = onChangeSettings,
+                onStart = {
+                    if (hasMic) vm.begin() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                },
+                onCancel = onExit,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+            TalksPhase.LIVE -> if (session != null) {
+                LiveOverlay(
+                    session = session,
+                    targetMinutes = vm.speech?.targetMinutes ?: 0,
+                    palette = palette,
+                    settings = settings,
+                    controlsVisible = controlsVisible,
+                    following = following,
+                    showHeard = settings.showHeard,
+                    onFollow = { readerRef.value?.resumeFollow(); following = true },
+                    onPauseResume = { st ->
+                        if (st.listening) session.pause() else session.resume()
+                        touch()
+                    },
+                    onFont = { delta ->
+                        onChangeSettings { it.copy(readerFontSp = (it.readerFontSp + delta).coerceIn(24, 140)) }
+                        touch()
+                    },
+                    onTheme = {
+                        onChangeSettings { it.copy(readerTheme = nextTheme(it.readerTheme)) }
+                        touch()
+                    },
+                    onFinish = { confirmExit = true },
+                    onRetry = { session.retry(); touch() },
+                )
+            }
+            TalksPhase.ENDED -> EndedPanel(
+                vm = vm,
+                onAgain = vm::again,
+                onExit = onExit,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+    }
+
+    if (confirmExit) {
+        AlertDialog(
+            onDismissRequest = { confirmExit = false },
+            title = { Text("¿Terminar el modo Talks?") },
+            text = { Text("Se detiene la escucha y se guarda tu ritmo de lectura para estimar mejor la duración de tus discursos.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmExit = false
+                    vm.finish()
+                }) { Text("Terminar") }
+            },
+            dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("Seguir hablando") } },
+        )
+    }
+}
+
+private fun nextTheme(t: ReaderTheme): ReaderTheme = when (t) {
+    ReaderTheme.NIGHT -> ReaderTheme.STAGE
+    ReaderTheme.STAGE -> ReaderTheme.DAY
+    ReaderTheme.DAY -> ReaderTheme.SEPIA
+    ReaderTheme.SEPIA -> ReaderTheme.NIGHT
+}
+
+private const val CONTROLS_HIDE_MS = 5_000L
+
+/** Presenter remotes send page/arrow/media keys; the volume keys can be used when enabled. */
+private fun handleKey(ev: KeyEvent, phase: TalksPhase, session: TalksSession?, volumeKeys: Boolean, onUsed: () -> Unit): Boolean {
+    if (phase != TalksPhase.LIVE || session == null) return false
+    val code = ev.keyCode
+    val next = code == KeyEvent.KEYCODE_PAGE_DOWN || code == KeyEvent.KEYCODE_DPAD_RIGHT ||
+        code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_MEDIA_NEXT ||
+        (volumeKeys && code == KeyEvent.KEYCODE_VOLUME_DOWN)
+    val previous = code == KeyEvent.KEYCODE_PAGE_UP || code == KeyEvent.KEYCODE_DPAD_LEFT ||
+        code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS ||
+        (volumeKeys && code == KeyEvent.KEYCODE_VOLUME_UP)
+    val toggle = code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_HEADSETHOOK
+    if (!next && !previous && !toggle) return false
+    if (ev.action == KeyEvent.ACTION_DOWN && ev.repeatCount == 0) {
+        when {
+            next -> session.nudge(1)
+            previous -> session.nudge(-1)
+            else -> if (session.state.value.listening) session.pause() else session.resume()
+        }
+        onUsed()
+    }
+    return true
+}
+
+@Composable
+private fun ImmersiveAndAwake() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = view.context.findActivity()?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller?.hide(WindowInsetsCompat.Type.systemBars())
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+}
+
+// ==========================================================================================
+// Live
+// ==========================================================================================
+
+@Composable
+private fun LiveOverlay(
+    session: TalksSession,
+    targetMinutes: Int,
+    palette: ReaderPalette,
+    settings: AppSettings,
+    controlsVisible: Boolean,
+    following: Boolean,
+    showHeard: Boolean,
+    onFollow: () -> Unit,
+    onPauseResume: (TalksSession.State) -> Unit,
+    onFont: (Int) -> Unit,
+    onTheme: () -> Unit,
+    onFinish: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val st by session.state.collectAsState()
+    val ink = Color(palette.text)
+
+    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
+        // Status: always visible, so the speaker can trust at a glance that the app is listening.
+        StatusPill(st, targetMinutes, palette, Modifier.align(Alignment.TopStart).padding(12.dp))
+
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopEnd),
+        ) {
+            Row(
+                Modifier.padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ControlButton(
+                    if (st.listening) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    if (st.listening) "Pausar escucha" else "Reanudar escucha",
+                    ink, highlighted = !st.listening,
+                ) { onPauseResume(st) }
+                TextControl("A−", ink) { onFont(-4) }
+                TextControl("A+", ink) { onFont(4) }
+                TextControl("◐", ink) { onTheme() }
+                ControlButton(Icons.Filled.Close, "Terminar", ink) { onFinish() }
+            }
+        }
+
+        // Problems with the recogniser.
+        st.error?.let { err ->
+            Surface(
+                Modifier.align(Alignment.TopCenter).padding(top = 64.dp, start = 16.dp, end = 16.dp).widthIn(max = 640.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = if (err.fatal) Color(0xFFB3261E) else Color(0xFF8A5A00),
+            ) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Warning, null, tint = Color.White)
+                    Spacer(Modifier.size(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(err.message, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                        if (err.fatal) {
+                            Text(
+                                "Puedes seguir a mano: mantén pulsada una palabra o usa el control remoto.",
+                                color = Color.White.copy(alpha = 0.85f),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    if (err.fatal) TextButton(onClick = onRetry) { Text("Reintentar", color = Color.White) }
+                }
+            }
+        }
+
+        // The end of the speech.
+        if (st.finished) {
+            Surface(
+                Modifier.align(Alignment.Center),
+                shape = RoundedCornerShape(24.dp),
+                color = Color(palette.accent),
+            ) {
+                Column(Modifier.padding(horizontal = 28.dp, vertical = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Fin del discurso", fontWeight = FontWeight.Bold, fontSize = 24.sp, color = Color.Black)
+                    TextButton(onClick = onFinish) { Text("Terminar y ver resumen", color = Color.Black) }
+                }
+            }
+        }
+
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (!following) {
+                Button(
+                    onClick = onFollow,
+                    modifier = Modifier.padding(bottom = 14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(palette.accent), contentColor = Color.Black),
+                ) {
+                    Icon(Icons.Filled.MyLocation, null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Volver a donde voy", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            }
+            if (showHeard && st.heard.isNotBlank()) {
+                Text(
+                    st.heard,
+                    color = ink.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
+                )
+            }
+            LinearProgressIndicator(
+                progress = { st.progress },
+                modifier = Modifier.fillMaxWidth().height(4.dp),
+                color = Color(palette.accent),
+                trackColor = ink.copy(alpha = 0.12f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(st: TalksSession.State, targetMinutes: Int, palette: ReaderPalette, modifier: Modifier) {
+    val ink = Color(palette.text)
+    val (color, label) = when {
+        st.error?.fatal == true -> Red to "Sin escucha"
+        !st.listening -> Gray to "En pausa"
+        st.error != null -> Amber to "Reconectando"
+        st.status == TrackStatus.OFF_SCRIPT -> Amber to "Improvisando"
+        st.status == TrackStatus.SEARCHING -> Amber to "Buscando"
+        st.engineState == EngineState.IDLE || st.engineState == EngineState.STARTING -> Gray to "Iniciando"
+        st.status == TrackStatus.WAITING -> Green to "Escuchando"
+        else -> Green to "Siguiendo"
+    }
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(ink.copy(alpha = 0.14f))
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(12.dp).clip(CircleShape).background(color))
+        // Microphone level: proof that the room is being heard.
+        Box(Modifier.width(28.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(ink.copy(alpha = 0.18f))) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(st.level.coerceIn(0.02f, 1f)).background(color))
+        }
+        Text(label, color = ink.copy(alpha = 0.85f), fontSize = 14.sp)
+        Text(formatClock(st.elapsedMs), color = ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        if (targetMinutes > 0 && st.progress > 0.03f) {
+            // Seconds ahead of (+) or behind (-) the time planned for the part already read.
+            val planned = st.progress * targetMinutes * 60
+            val ahead = (planned - st.elapsedMs / 1000f).toInt()
+            if (kotlin.math.abs(ahead) >= 10) {
+                Text(
+                    (if (ahead > 0) "+" else "−") + formatClock(kotlin.math.abs(ahead) * 1000L),
+                    color = if (ahead > 0) Green else Amber,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ControlButton(icon: ImageVector, description: String, ink: Color, highlighted: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(if (highlighted) Amber else ink.copy(alpha = 0.16f))
+            .clickable(onClickLabel = description, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = description, tint = if (highlighted) Color.Black else ink, modifier = Modifier.size(28.dp))
+    }
+}
+
+@Composable
+private fun TextControl(text: String, ink: Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(ink.copy(alpha = 0.16f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+// ==========================================================================================
+// Preparing
+// ==========================================================================================
+
+@Composable
+private fun PreparePanel(
+    vm: TalksViewModel,
+    settings: AppSettings,
+    hasMic: Boolean,
+    onRequestMic: () -> Unit,
+    onImportModel: () -> Unit,
+    onChangeSettings: ((AppSettings) -> AppSettings) -> Unit,
+    onStart: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val serviceAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
+    val doc = vm.speech?.doc
+    val seconds = doc?.estimatedSeconds(settings.wordsPerMinute, settings.readHeadings) ?: 0
+    val engineReady = when (settings.engine) {
+        EngineKind.ANDROID -> serviceAvailable
+        EngineKind.VOSK -> vm.voskInstalled
+    }
+    val canStart = engineReady
+
+    Surface(
+        modifier
+            .padding(12.dp)
+            .widthIn(max = 780.dp)
+            .fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 6.dp,
+        shadowElevation = 12.dp,
+    ) {
+        Column(
+            Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                vm.speech?.title?.ifBlank { "Sin título" } ?: "",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "Dura unos ${formatDuration(seconds)} a ${settings.wordsPerMinute} palabras por minuto." +
+                    ((vm.speech?.targetMinutes ?: 0).takeIf { it > 0 }?.let { " Objetivo: $it min." } ?: ""),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            CheckRow(
+                ok = hasMic, title = "Micrófono",
+                detail = if (hasMic) "Permiso concedido" else "Talks necesita el micrófono para escucharte.",
+            ) {
+                if (!hasMic) Button(onClick = onRequestMic) { Text("Conceder permiso") }
+            }
+
+            // Engine
+            val engineDetail = when (settings.engine) {
+                EngineKind.ANDROID ->
+                    if (serviceAvailable) "Servicio de voz de Android · ${settings.language}" + if (settings.preferOffline) " · sin conexión preferido" else ""
+                    else "Este dispositivo no tiene servicio de reconocimiento. Usa el modo sin conexión."
+                EngineKind.VOSK ->
+                    if (vm.voskInstalled) "Sin conexión (Vosk) · modelo instalado, ${vm.vosk.sizeOnDiskMb()} MB"
+                    else "Falta el modelo de voz sin conexión (unos 40 MB)."
+            }
+            CheckRow(ok = engineReady, title = "Reconocimiento de voz", detail = engineDetail) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = settings.engine == EngineKind.ANDROID,
+                            onClick = { onChangeSettings { it.copy(engine = EngineKind.ANDROID) } },
+                            label = { Text("Android") },
+                        )
+                        FilterChip(
+                            selected = settings.engine == EngineKind.VOSK,
+                            onClick = { onChangeSettings { it.copy(engine = EngineKind.VOSK) } },
+                            label = { Text("Sin conexión (Vosk)") },
+                        )
+                    }
+                    if (settings.engine == EngineKind.VOSK) ModelControls(vm, onImportModel)
+                }
+            }
+
+            // Microphone test
+            CheckRow(
+                ok = null, title = "Prueba de reconocimiento",
+                detail = when {
+                    vm.testError != null -> vm.testError?.message ?: ""
+                    vm.testing && vm.testHeard.isBlank() -> "Habla en voz alta, como en el escenario…"
+                    vm.testing -> "«${vm.testHeard}»"
+                    else -> "Comprueba que la app te entiende antes de empezar."
+                },
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (vm.testing) {
+                        LinearProgressIndicator(progress = { vm.testLevel }, modifier = Modifier.fillMaxWidth().height(6.dp))
+                    }
+                    OutlinedButton(
+                        onClick = { if (vm.testing) vm.stopTest() else if (hasMic) vm.startTest() else onRequestMic() },
+                        enabled = engineReady,
+                    ) {
+                        Icon(Icons.Filled.Mic, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text(if (vm.testing) "Detener prueba" else "Probar micrófono")
+                    }
+                }
+            }
+
+            // Where to start
+            val startsAtBeginning = vm.startToken == 0
+            CheckRow(
+                ok = null, title = "Dónde empezar",
+                detail = if (startsAtBeginning) {
+                    "Desde el principio. Mantén pulsada una palabra del texto para empezar desde ahí."
+                } else {
+                    val ix = vm.index
+                    val snippet = ix?.text?.let { t ->
+                        val from = ix.startChar(vm.startToken)
+                        t.substring(from, minOf(t.length, from + 60)).replace('\n', ' ')
+                    } ?: ""
+                    "Desde «$snippet…»"
+                },
+            ) {
+                if (!startsAtBeginning) TextButton(onClick = vm::resetStart) { Text("Volver al principio") }
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = {
+                    vm.stopTest()
+                    onCancel()
+                }) { Text("Cancelar") }
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = onStart,
+                    enabled = canStart,
+                    modifier = Modifier.height(56.dp),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("COMENZAR", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelControls(vm: TalksViewModel, onImport: () -> Unit) {
+    val p = vm.voskProgress
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        when (p) {
+            is ModelDownload.Progress -> {
+                if (p.fraction >= 0) LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth())
+                else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (p.fraction >= 0) "Descargando… ${(p.fraction * 100).toInt()} %" else "Descargando…",
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = vm::cancelModelDownload) { Text("Cancelar") }
+                }
+            }
+            ModelDownload.Installing -> {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("Instalando el modelo…", style = MaterialTheme.typography.bodySmall)
+            }
+            is ModelDownload.Failed -> {
+                Text(
+                    "No se pudo instalar: ${p.message}",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+                )
+            }
+            else -> {}
+        }
+        if (p !is ModelDownload.Progress && p != ModelDownload.Installing) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!vm.voskInstalled) {
+                    Button(onClick = vm::downloadVoskModel) {
+                        Icon(Icons.Filled.Download, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("Descargar modelo")
+                    }
+                }
+                OutlinedButton(onClick = onImport) { Text("Importar .zip") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CheckRow(ok: Boolean?, title: String, detail: String, action: @Composable () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        val (icon, tint) = when (ok) {
+            true -> Icons.Filled.CheckCircle to Green
+            false -> Icons.Filled.ErrorOutline to MaterialTheme.colorScheme.error
+            null -> Icons.Filled.Mic to MaterialTheme.colorScheme.primary
+        }
+        Icon(icon, null, tint = tint, modifier = Modifier.size(26.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            action()
+        }
+    }
+}
+
+// ==========================================================================================
+// Ended
+// ==========================================================================================
+
+@Composable
+private fun EndedPanel(vm: TalksViewModel, onAgain: () -> Unit, onExit: () -> Unit, modifier: Modifier) {
+    val s = vm.summary
+    Surface(
+        modifier.padding(24.dp).widthIn(max = 520.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 6.dp,
+        shadowElevation = 12.dp,
+    ) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("Sesión terminada", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            if (s != null) {
+                StatLine("Tiempo hablando", formatClock(s.activeMs))
+                StatLine("Palabras cubiertas", "${s.wordsCovered} de ${s.totalWords} (${(s.completion * 100).toInt()} %)")
+                if (s.wpm > 0) {
+                    StatLine("Tu ritmo", "${s.wpm} palabras por minuto")
+                    Text(
+                        "Talks usará este ritmo para calcular cuánto dura cada discurso.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "Fue demasiado corta para medir tu ritmo.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onAgain, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.Replay, null, Modifier.size(18.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text("Practicar de nuevo")
+                }
+                Button(onClick = onExit, modifier = Modifier.weight(1f)) { Text("Salir") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    }
+}

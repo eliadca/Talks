@@ -160,6 +160,9 @@ class SpeechRepository(
 
     suspend fun count(): Int = speechDao.count()
 
+    /** Notes that the speech was just used in Talks mode. */
+    suspend fun setLastTalkNow(id: Long) = speechDao.setLastTalk(id, now())
+
     // --- folders ----------------------------------------------------------------------------
 
     suspend fun createFolder(name: String, color: Int): Long =

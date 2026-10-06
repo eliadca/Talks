@@ -22,6 +22,7 @@ import com.eliadca.talks.ui.editor.EditorViewModel
 import com.eliadca.talks.ui.home.HomeScreen
 import com.eliadca.talks.ui.home.HomeViewModel
 import com.eliadca.talks.ui.settings.SettingsScreen
+import com.eliadca.talks.ui.talks.TalksScreen
 import com.eliadca.talks.ui.theme.TalksTheme
 import com.eliadca.talks.ui.theme.isDarkFor
 import kotlinx.coroutines.launch
@@ -93,7 +94,15 @@ private fun TalksRoot() {
                 arguments = listOf(navArgument("id") { type = NavType.LongType }),
             ) { entry ->
                 val id = entry.arguments?.getLong("id") ?: 0L
-                androidx.compose.material3.Text("Talks $id")
+                TalksScreen(
+                    speechId = id,
+                    settings = settings,
+                    onChangeSettings = { change -> scope.launch { container.settings.update(change) } },
+                    onExit = {
+                        nav.popBackStack()
+                        home.refreshPace(settings.wordsPerMinute)
+                    },
+                )
             }
         }
     }
