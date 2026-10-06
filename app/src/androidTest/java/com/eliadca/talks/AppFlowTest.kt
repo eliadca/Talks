@@ -32,6 +32,7 @@ import com.eliadca.talks.core.sample.SampleContent
 import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.data.EngineKind
 import com.eliadca.talks.editor.RichEditText
+import com.eliadca.talks.speech.EngineState
 import com.eliadca.talks.speech.SpeechEngine
 import com.eliadca.talks.speech.SpeechEvent
 import kotlinx.coroutines.Dispatchers
@@ -87,7 +88,11 @@ class AppFlowTest {
         val flow = MutableSharedFlow<SpeechEvent>(replay = 16, extraBufferCapacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
         override val events: SharedFlow<SpeechEvent> = flow
         override val name = "Fake"
-        override fun start() {}
+        // Like the real engines: announce that the recogniser is up and listening.
+        override fun start() {
+            flow.tryEmit(SpeechEvent.State(EngineState.STARTING))
+            flow.tryEmit(SpeechEvent.State(EngineState.LISTENING))
+        }
         override fun stop() {}
         override fun release() {}
         fun hear(text: String, final: Boolean = false) {
