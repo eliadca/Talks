@@ -112,6 +112,7 @@ import com.eliadca.talks.container
 import com.eliadca.talks.ui.findActivity
 import com.eliadca.talks.ui.formatClock
 import com.eliadca.talks.ui.home.formatDuration
+import com.eliadca.talks.ui.theme.TalksTheme
 import kotlinx.coroutines.delay
 
 private val Green = Color(0xFF2ECC71)
@@ -256,6 +257,9 @@ fun TalksScreen(
         },
     )
 
+    // Panels and dialogs follow the stage: dark on a dark stage, light on a light one.
+    val darkStage = Color(palette.background).luminance() < 0.5f
+    TalksTheme(darkTheme = darkStage) {
     Box(
         Modifier
             .fillMaxSize()
@@ -393,6 +397,7 @@ fun TalksScreen(
             },
             dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("Seguir hablando") } },
         )
+    }
     }
 }
 

@@ -192,7 +192,8 @@ class SpeechRepository(
 
     private fun derive(title: String, doc: RichDoc): Derived {
         val preview = doc.text.lineSequence()
-            .map { it.trim() }
+            // Notes for the speaker are not part of what the speech says.
+            .map { it.replace(NOTE, "").replace(SPACES, " ").trim() }
             .filter { it.isNotEmpty() }
             .take(3)
             .joinToString("  ")
@@ -207,6 +208,8 @@ class SpeechRepository(
     private fun copyTitle(title: String): String = if (title.isBlank()) "Copia" else "$title (copia)"
 
     private companion object {
+        val NOTE = Regex("\\[[^\\]]*\\]")
+        val SPACES = Regex("\\s{2,}")
         const val SNAPSHOT_INTERVAL_MS = 10L * 60 * 1000
         const val MAX_AUTOMATIC_VERSIONS = 40
     }

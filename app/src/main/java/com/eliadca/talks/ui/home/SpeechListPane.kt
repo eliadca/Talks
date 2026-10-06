@@ -207,6 +207,13 @@ fun SpeechListPane(
     }
 }
 
+/** "Ahora mismo" for the last minute, then the system's own relative time ("hace 5 minutos"). */
+private fun relativeTime(stamp: Long): String {
+    val now = System.currentTimeMillis()
+    return if (now - stamp < DateUtils.MINUTE_IN_MILLIS) "Ahora mismo"
+    else DateUtils.getRelativeTimeSpanString(stamp, now, DateUtils.MINUTE_IN_MILLIS).toString()
+}
+
 /** A small fact under a speech: its length in time or in words. */
 @Composable
 private fun MetaChip(icon: androidx.compose.ui.graphics.vector.ImageVector?, text: String) {
@@ -309,7 +316,7 @@ private fun SpeechCard(
                     Spacer(Modifier.weight(1f))
                     val stamp = if (isTrash && item.trashedAt != null) item.trashedAt else item.updatedAt
                     Text(
-                        DateUtils.getRelativeTimeSpanString(stamp, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString(),
+                        relativeTime(stamp),
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.onSurfaceVariant.copy(alpha = 0.85f),
                         maxLines = 1,

@@ -25,7 +25,7 @@ object NoteDecor {
             .filter { it.second > it.first }
             .sortedBy { it.first }
         paint.style = Paint.Style.FILL
-        paint.color = (style.muted and 0x00FFFFFF) or (ALPHA shl 24)
+        paint.color = if (style.noteColor != 0) style.noteColor else (style.muted and 0x00FFFFFF) or (ALPHA shl 24)
         val radius = style.dp(7f)
         val padX = style.dp(4f)
         val len = layout.text.length

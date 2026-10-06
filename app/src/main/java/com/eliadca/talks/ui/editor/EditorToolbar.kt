@@ -1,5 +1,7 @@
 package com.eliadca.talks.ui.editor
 
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.background
 import androidx.compose.ui.unit.sp
@@ -74,6 +76,7 @@ import com.eliadca.talks.ui.theme.TextColors
  * The formatting bar above the page, in groups: paragraph style, character style, colour and
  * size, lists, alignment, and notes. It scrolls sideways when the screen is narrow.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FormatToolbar(c: EditorController, modifier: Modifier = Modifier) {
     val f = c.format
@@ -82,12 +85,11 @@ fun FormatToolbar(c: EditorController, modifier: Modifier = Modifier) {
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        Row(
-            Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        // On narrow screens the groups wrap onto a second line instead of hiding off the edge.
+        FlowRow(
+            Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             TextStyleMenu(f.block) { c.toggleBlock(it); c.focus() }
             ToolGroup {
@@ -120,9 +122,7 @@ fun FormatToolbar(c: EditorController, modifier: Modifier = Modifier) {
                 }
             }
             ToolGroup {
-                ToolButton(Icons.Filled.FormatAlignLeft, "Alinear a la izquierda", active = f.align == Align.START) { c.setAlign(Align.START); c.focus() }
-                ToolButton(Icons.Filled.FormatAlignCenter, "Centrar", active = f.align == Align.CENTER) { c.setAlign(Align.CENTER); c.focus() }
-                ToolButton(Icons.Filled.FormatAlignRight, "Alinear a la derecha", active = f.align == Align.END) { c.setAlign(Align.END); c.focus() }
+                AlignMenu(f.align) { c.setAlign(it); c.focus() }
                 ToolButton(Icons.AutoMirrored.Filled.FormatIndentDecrease, "Reducir sangría") { c.indent(-1); c.focus() }
                 ToolButton(Icons.AutoMirrored.Filled.FormatIndentIncrease, "Aumentar sangría") { c.indent(1); c.focus() }
             }
@@ -149,6 +149,31 @@ private fun ToolGroup(content: @Composable RowScope.() -> Unit) {
     )
 }
 
+/** Alignment in one button that shows the current one; the choices open from it. */
+@Composable
+private fun AlignMenu(current: Align, onPick: (Align) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val options = listOf(
+        Triple(Align.START, Icons.Filled.FormatAlignLeft, "Alinear a la izquierda"),
+        Triple(Align.CENTER, Icons.Filled.FormatAlignCenter, "Centrar"),
+        Triple(Align.END, Icons.Filled.FormatAlignRight, "Alinear a la derecha"),
+    )
+    val icon = options.firstOrNull { it.first == current }?.second ?: Icons.Filled.FormatAlignLeft
+    Box {
+        ToolButton(icon, "Alineación", active = current != Align.START) { open = true }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for ((align, optionIcon, label) in options) {
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    leadingIcon = { Icon(optionIcon, contentDescription = null) },
+                    trailingIcon = { if (align == current) Icon(Icons.Filled.Check, contentDescription = null) },
+                    onClick = { open = false; onPick(align) },
+                )
+            }
+        }
+    }
+}
+
 /** The paragraph style, shown by name: Texto, Título grande, Título, Subtítulo. */
 @Composable
 private fun TextStyleMenu(current: BlockType, onPick: (BlockType) -> Unit) {
@@ -166,12 +191,12 @@ private fun TextStyleMenu(current: BlockType, onPick: (BlockType) -> Unit) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(colors.surface)
                 .clickable(role = Role.Button, onClickLabel = "Estilo del párrafo") { open = true }
-                .padding(start = 12.dp, end = 6.dp, top = 9.dp, bottom = 9.dp),
+                .padding(start = 12.dp, end = 6.dp, top = 11.dp, bottom = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Filled.Title, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.widthIn(min = 92.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.widthIn(min = 84.dp))
             Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = colors.onSurfaceVariant)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -221,7 +246,7 @@ fun ToolButton(
     }
     Box(
         Modifier
-            .size(40.dp)
+            .size(38.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(if (active) colors.primaryContainer else Color.Transparent)
             .semantics { contentDescription = description }

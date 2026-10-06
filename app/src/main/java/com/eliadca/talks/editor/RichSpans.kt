@@ -23,6 +23,8 @@ class EditorStyle(
     var muted: Int,
     var findColor: Int = 0x66FFC107,
     var findCurrentColor: Int = 0xCCFF9800.toInt(),
+    /** Background behind notes for the speaker; 0 means a faint tint of [muted]. */
+    var noteColor: Int = 0,
 ) {
     fun dp(v: Float) = v * density
 }

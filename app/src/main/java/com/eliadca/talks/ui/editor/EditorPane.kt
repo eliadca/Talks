@@ -387,7 +387,7 @@ private fun PageEditor(
             modifier = modifier,
             factory = { ctx ->
                 val themed = ContextThemeWrapper(ctx, if (dark) R.style.EditorTheme_Dark else R.style.EditorTheme_Light)
-                val style = EditorStyle(ctx.resources.displayMetrics.density, accent, muted)
+                val style = EditorStyle(ctx.resources.displayMetrics.density, accent, muted, noteColor = noteTint(dark))
                 RichEditText(themed, style).also { view ->
                     view.tag = style
                     view.applyAppearance(textColor, hint, selection, settings.editorFontSp.toFloat(), settings.editorSerif)
@@ -399,6 +399,7 @@ private fun PageEditor(
                 (view.tag as? EditorStyle)?.let {
                     it.accent = accent
                     it.muted = muted
+                    it.noteColor = noteTint(dark)
                 }
                 view.applyAppearance(textColor, hint, selection, settings.editorFontSp.toFloat(), settings.editorSerif)
             },
@@ -409,3 +410,6 @@ private fun PageEditor(
         }
     }
 }
+
+/** Notes for the speaker look like a soft sticky note. */
+private fun noteTint(dark: Boolean): Int = if (dark) 0x40FFC857 else 0x38FFB300
