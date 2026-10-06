@@ -326,6 +326,6 @@ class TalksSessionTest {
         session.setMarking(Marking(lead = 2))
         waitFor("lead applied") { session.state.value.nextStart == index.startChar(second) }
         val st = session.state.value
-        assertEquals(0, st.spokenEnd) // the first phrase is not dimmed yet
+        assertEquals("the first phrase is not dimmed yet", index.startChar(0), st.spokenEnd)
     }
 }

@@ -3,6 +3,7 @@ package com.eliadca.talks.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.os.Looper
 import android.view.View
 import androidx.test.core.app.ApplicationProvider
@@ -138,15 +139,26 @@ class ReaderViewTest {
             val r = ReaderView(ctx).apply {
                 setDocument(doc)
                 configure(ReaderConfig(40f, 1.35f, false, palette, 0.35f, true, guide = guide))
-                measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
-                layout(0, 0, 1200, 800)
+                // Twice, like a real screen: the room above the text depends on the reader's own
+                // height, which it only knows after the first layout (it then asks for another).
+                repeat(2) {
+                    requestLayout()
+                    measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
+                    layout(0, 0, 1200, 800)
+                }
             }
             r.setProgress(0, 0, marks, jump = true)
             val bmp = Bitmap.createBitmap(1200, 800, Bitmap.Config.ARGB_8888)
             r.draw(Canvas(bmp))
             val px = IntArray(1200 * 800)
             bmp.getPixels(px, 0, 1200, 0, 0, 1200, 800)
-            return px.count { it == palette.accent }
+            // The accent itself, give or take the rounding of anti-aliased edges.
+            fun near(a: Int, b: Int) = kotlin.math.abs(a - b) <= 6
+            val accent = palette.accent
+            return px.count {
+                Color.alpha(it) == 255 && near(Color.red(it), Color.red(accent)) &&
+                    near(Color.green(it), Color.green(accent)) && near(Color.blue(it), Color.blue(accent))
+            }
         }
         val marks = listOf(CharSpan(0, text.indexOf(" [")), CharSpan(text.indexOf("cuatro"), text.indexOf("cinco") + 5))
         assertTrue("marked words are underlined", accentPixels(marks, guide = false) > 0)
