@@ -169,6 +169,32 @@ class TalksSessionTest {
         waitFor("error cleared") { session.state.value.error == null }
     }
 
+    @Test fun manualModeStopsEverythingAutomaticAndResumesFromWhereTheSpeakerScrolled() {
+        session.start(0)
+        engine.hear("buenos dias a todos gracias por estar aqui")
+        waitFor("following") { session.state.value.position >= 8 }
+
+        session.enterManual()
+        val st = session.state.value
+        assertTrue(st.manual)
+        assertFalse("the recogniser is off", st.listening)
+        assertEquals(1, engine.stopped)
+        val before = st.position
+        // Late results from the recogniser must not move anything.
+        engine.hear("buenos dias a todos gracias por estar aqui y gracias por regalarme lo mas valioso", final = true)
+        Thread.sleep(200)
+        assertEquals(before, session.state.value.position)
+        // The clock keeps running: the speaker is still talking.
+        val t0 = session.state.value.elapsedMs
+        waitFor("clock running in manual mode") { session.state.value.elapsedMs > t0 }
+
+        session.leaveManual(120)
+        waitFor("resynchronised where the speaker scrolled") { session.state.value.position == 120 }
+        assertFalse(session.state.value.manual)
+        assertTrue(session.state.value.listening)
+        assertEquals(2, engine.started)
+    }
+
     @Test fun reachingTheEndFinishesTheSpeech() {
         session.start(index.size - 6)
         waitFor("start") { session.state.value.position == index.size - 6 }

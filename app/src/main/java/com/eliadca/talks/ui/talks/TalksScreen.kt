@@ -12,6 +12,16 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.material.icons.filled.VerticalAlignCenter
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -39,7 +49,6 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Mic
@@ -162,6 +171,38 @@ fun TalksScreen(
         controlsVisible = true
     }
 
+    /** Back to following the voice from script word [token], with the text already in place. */
+    fun followVoiceFrom(token: Int) {
+        val run = vm.session ?: return
+        val ix = vm.index ?: return
+        val reader = readerRef.value
+        val t = token.coerceIn(0, ix.size)
+        reader?.setManualMode(false)
+        reader?.let {
+            val start = ix.startChar(t)
+            it.setProgress(start, start, start, jump = true)
+            it.resumeFollow(animated = false)
+        }
+        if (run.state.value.manual) run.leaveManual(t) else run.setPosition(t)
+        following = true
+    }
+
+    /** Continues from the line the speaker is looking at (the reading line). */
+    fun followFromReadingLine() {
+        val reader = readerRef.value ?: return
+        val ix = vm.index ?: return
+        followVoiceFrom(ix.tokenAtChar(reader.readingLineOffset()))
+        touch()
+    }
+
+    fun enterManual() {
+        val run = vm.session ?: return
+        readerRef.value?.setManualMode(true)
+        run.enterManual()
+        following = true
+        touch()
+    }
+
     BackHandler {
         when (phase) {
             TalksPhase.LIVE -> confirmExit = true
@@ -180,7 +221,13 @@ fun TalksScreen(
     // Steer the run with a presentation remote or the volume keys.
     val currentSession by rememberUpdatedState(session)
     val keyHandler = rememberUpdatedState<(KeyEvent) -> Boolean>(
-        { ev -> handleKey(ev, vm.phase, currentSession, settings.volumeKeys) { touch() } },
+        { ev ->
+            handleKey(
+                ev, vm.phase, currentSession, settings.volumeKeys,
+                onManualScroll = { lines -> readerRef.value?.scrollLines(lines) },
+                onToggleManual = { if (currentSession?.state?.value?.manual == true) followFromReadingLine() else enterManual() },
+            ) { touch() }
+        },
     )
     DisposableEffect(activity) {
         activity?.talksKeyHandler = { ev -> keyHandler.value(ev) }
@@ -192,7 +239,7 @@ fun TalksScreen(
             val ix = vm.index
             if (ix != null && !(touchLocked && vm.phase == TalksPhase.LIVE)) {
                 when (vm.phase) {
-                    TalksPhase.LIVE -> vm.session?.setPosition(ix.tokenAtChar(offset))
+                    TalksPhase.LIVE -> followVoiceFrom(ix.tokenAtChar(offset))
                     TalksPhase.PREPARE -> vm.setStartFromOffset(offset)
                     else -> {}
                 }
@@ -216,7 +263,8 @@ fun TalksScreen(
     ) {
         if (doc != null) {
             AndroidView(
-                modifier = Modifier.fillMaxSize(),
+                // The text keeps clear of the camera cutout; the background still fills the screen.
+                modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout),
                 factory = { ctx ->
                     ReaderView(ctx).apply {
                         setDocument(doc)
@@ -257,7 +305,10 @@ fun TalksScreen(
         LaunchedEffect(reader, session) {
             if (reader != null && session != null) {
                 reader.resumeFollow(animated = false)
-                session.state.collect { st -> reader.setProgress(st.spokenEnd, st.nextStart, st.nextEnd) }
+                session.state.collect { st ->
+                    reader.setManualMode(st.manual)
+                    reader.setProgress(st.spokenEnd, st.nextStart, st.nextEnd)
+                }
             }
         }
 
@@ -286,35 +337,38 @@ fun TalksScreen(
                     session = session,
                     targetMinutes = vm.speech?.targetMinutes ?: 0,
                     palette = palette,
-                    settings = settings,
                     controlsVisible = controlsVisible,
                     following = following,
                     locked = touchLocked,
-                    onToggleLock = { touchLocked = !touchLocked; controlsVisible = true; lastInteraction = System.currentTimeMillis() },
                     showHeard = settings.showHeard,
-                    onFollow = { readerRef.value?.resumeFollow(); following = true },
-                    onPauseResume = { st ->
-                        if (st.listening || st.auto) session.pause() else session.resume()
-                        touch()
-                    },
-                    onAuto = { st ->
-                        if (st.auto) session.stopAuto() else session.startAuto(settings.wordsPerMinute)
-                        touch()
-                    },
-                    onAutoSpeed = { delta ->
-                        session.setAutoSpeed(session.state.value.autoWpm + delta)
-                        touch()
-                    },
-                    onFont = { delta ->
-                        onChangeSettings { it.copy(readerFontSp = (it.readerFontSp + delta).coerceIn(24, 140)) }
-                        touch()
-                    },
-                    onTheme = {
-                        onChangeSettings { it.copy(readerTheme = nextTheme(it.readerTheme)) }
-                        touch()
-                    },
-                    onFinish = { confirmExit = true },
-                    onRetry = { session.retry(); touch() },
+                    actions = LiveActions(
+                        onToggleLock = { touchLocked = !touchLocked; controlsVisible = true; lastInteraction = System.currentTimeMillis() },
+                        onFollow = { readerRef.value?.resumeFollow(); following = true; touch() },
+                        onFollowFromHere = { followFromReadingLine() },
+                        onManual = { on -> if (on) enterManual() else followFromReadingLine() },
+                        onPauseResume = { st ->
+                            if (st.listening || st.auto) session.pause() else session.resume()
+                            touch()
+                        },
+                        onAuto = { st ->
+                            if (st.auto) session.stopAuto() else session.startAuto(settings.wordsPerMinute)
+                            touch()
+                        },
+                        onAutoSpeed = { delta ->
+                            session.setAutoSpeed(session.state.value.autoWpm + delta)
+                            touch()
+                        },
+                        onFont = { delta ->
+                            onChangeSettings { it.copy(readerFontSp = (it.readerFontSp + delta).coerceIn(24, 140)) }
+                            touch()
+                        },
+                        onTheme = {
+                            onChangeSettings { it.copy(readerTheme = nextTheme(it.readerTheme)) }
+                            touch()
+                        },
+                        onFinish = { confirmExit = true },
+                        onRetry = { session.retry(); touch() },
+                    ),
                 )
             }
             TalksPhase.ENDED -> EndedPanel(
@@ -351,8 +405,20 @@ private fun nextTheme(t: ReaderTheme): ReaderTheme = when (t) {
 
 private const val CONTROLS_HIDE_MS = 5_000L
 
-/** Presenter remotes send page/arrow/media keys; the volume keys can be used when enabled. */
-private fun handleKey(ev: KeyEvent, phase: TalksPhase, session: TalksSession?, volumeKeys: Boolean, onUsed: () -> Unit): Boolean {
+/**
+ * Presenter remotes send page/arrow/media keys; the volume keys can be used when enabled. In
+ * manual mode next/previous scroll the text. The "black screen" key of most remotes (B or .)
+ * switches manual mode on and off.
+ */
+private fun handleKey(
+    ev: KeyEvent,
+    phase: TalksPhase,
+    session: TalksSession?,
+    volumeKeys: Boolean,
+    onManualScroll: (Int) -> Unit,
+    onToggleManual: () -> Unit,
+    onUsed: () -> Unit,
+): Boolean {
     if (phase != TalksPhase.LIVE || session == null) return false
     val code = ev.keyCode
     val next = code == KeyEvent.KEYCODE_PAGE_DOWN || code == KeyEvent.KEYCODE_DPAD_RIGHT ||
@@ -362,9 +428,15 @@ private fun handleKey(ev: KeyEvent, phase: TalksPhase, session: TalksSession?, v
         code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS ||
         (volumeKeys && code == KeyEvent.KEYCODE_VOLUME_UP)
     val toggle = code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_HEADSETHOOK
-    if (!next && !previous && !toggle) return false
+    val manualKey = code == KeyEvent.KEYCODE_B || code == KeyEvent.KEYCODE_PERIOD
+    if (!next && !previous && !toggle && !manualKey) return false
     if (ev.action == KeyEvent.ACTION_DOWN && ev.repeatCount == 0) {
+        val manual = session.state.value.manual
         when {
+            manualKey -> onToggleManual()
+            manual && next -> onManualScroll(3)
+            manual && previous -> onManualScroll(-3)
+            manual -> onToggleManual()
             next -> session.nudge(1)
             previous -> session.nudge(-1)
             else -> if (session.state.value.listening) session.pause() else session.resume()
@@ -394,25 +466,31 @@ private fun ImmersiveAndAwake() {
 // Live
 // ==========================================================================================
 
+/** What the live controls can do. */
+private class LiveActions(
+    val onToggleLock: () -> Unit,
+    val onFollow: () -> Unit,
+    val onFollowFromHere: () -> Unit,
+    val onManual: (Boolean) -> Unit,
+    val onPauseResume: (TalksSession.State) -> Unit,
+    val onAuto: (TalksSession.State) -> Unit,
+    val onAutoSpeed: (Int) -> Unit,
+    val onFont: (Int) -> Unit,
+    val onTheme: () -> Unit,
+    val onFinish: () -> Unit,
+    val onRetry: () -> Unit,
+)
+
 @Composable
 private fun LiveOverlay(
     session: TalksSession,
     targetMinutes: Int,
     palette: ReaderPalette,
-    settings: AppSettings,
     controlsVisible: Boolean,
     following: Boolean,
     locked: Boolean,
-    onToggleLock: () -> Unit,
     showHeard: Boolean,
-    onFollow: () -> Unit,
-    onPauseResume: (TalksSession.State) -> Unit,
-    onAuto: (TalksSession.State) -> Unit,
-    onAutoSpeed: (Int) -> Unit,
-    onFont: (Int) -> Unit,
-    onTheme: () -> Unit,
-    onFinish: () -> Unit,
-    onRetry: () -> Unit,
+    actions: LiveActions,
 ) {
     val st by session.state.collectAsState()
     val ink = Color(palette.text)
@@ -425,93 +503,69 @@ private fun LiveOverlay(
             visible = controlsVisible,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopEnd),
+            modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
         ) {
-            Row(
-                Modifier.padding(12.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ControlButton(
-                    if (st.listening || st.auto) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    if (st.listening || st.auto) "Pausar" else "Reanudar escucha",
-                    ink, highlighted = !st.listening && !st.auto,
-                ) { onPauseResume(st) }
-                ControlButton(Icons.Filled.FastForward, if (st.auto) "Volver a escuchar" else "Avance automático", ink, highlighted = st.auto) { onAuto(st) }
-                ControlButton(if (locked) Icons.Filled.Lock else Icons.Filled.LockOpen, if (locked) "Desbloquear toques" else "Bloquear toques", ink, highlighted = locked) { onToggleLock() }
-                TextControl("A−", ink) { onFont(-4) }
-                TextControl("A+", ink) { onFont(4) }
-                TextControl("◐", ink) { onTheme() }
-                ControlButton(Icons.Filled.Close, "Terminar", ink) { onFinish() }
-            }
+            ControlsBar(st, palette, locked, actions)
         }
 
         // Problems with the recogniser.
-        st.error?.let { err ->
+        st.error?.takeIf { !st.manual }?.let { err ->
             Surface(
-                Modifier.align(Alignment.TopCenter).padding(top = 64.dp, start = 16.dp, end = 16.dp).widthIn(max = 640.dp),
-                shape = RoundedCornerShape(16.dp),
+                Modifier.align(Alignment.TopCenter).padding(top = 104.dp, start = 16.dp, end = 16.dp).widthIn(max = 680.dp),
+                shape = RoundedCornerShape(20.dp),
                 color = if (err.fatal) Color(0xFFB3261E) else Color(0xFF8A5A00),
+                shadowElevation = 8.dp,
             ) {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Warning, null, tint = Color.White)
-                    Spacer(Modifier.size(10.dp))
+                    Spacer(Modifier.size(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(err.message, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                        Text(err.message, color = Color.White, style = MaterialTheme.typography.bodyLarge)
                         if (err.fatal) {
                             Text(
-                                "Puedes seguir a mano: mantén pulsada una palabra o usa el control remoto.",
+                                "Sigue en modo manual: desliza el texto o usa el control remoto.",
                                 color = Color.White.copy(alpha = 0.85f),
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodyMedium,
                             )
                         }
                     }
-                    if (err.fatal) TextButton(onClick = onRetry) { Text("Reintentar", color = Color.White) }
+                    if (err.fatal) {
+                        TextButton(onClick = { actions.onManual(true) }) { Text("Manual", color = Color.White, fontWeight = FontWeight.Bold) }
+                        TextButton(onClick = actions.onRetry) { Text("Reintentar", color = Color.White) }
+                    }
                 }
             }
         }
 
         // The end of the speech.
-        if (st.finished) {
+        if (st.finished && !st.manual) {
             Surface(
                 Modifier.align(Alignment.Center),
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(28.dp),
                 color = Color(palette.accent),
+                shadowElevation = 12.dp,
             ) {
-                Column(Modifier.padding(horizontal = 28.dp, vertical = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Fin del discurso", fontWeight = FontWeight.Bold, fontSize = 24.sp, color = Color.Black)
-                    TextButton(onClick = onFinish) { Text("Terminar y ver resumen", color = Color.Black) }
+                Column(Modifier.padding(horizontal = 32.dp, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.Flag, null, tint = contentOn(Color(palette.accent)), modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text("Fin del discurso", fontWeight = FontWeight.Bold, fontSize = 26.sp, color = contentOn(Color(palette.accent)))
+                    TextButton(onClick = actions.onFinish) {
+                        Text("Terminar y ver resumen", color = contentOn(Color(palette.accent)), fontSize = 16.sp)
+                    }
                 }
             }
         }
 
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (st.auto) {
-                Surface(
-                    Modifier.padding(bottom = 14.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    color = Color(0xFF1B3A5C),
-                ) {
-                    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { onAutoSpeed(-10) }) { Text("−10", color = Color.White, fontSize = 20.sp) }
-                        Text("${st.autoWpm} palabras/min", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        TextButton(onClick = { onAutoSpeed(10) }) { Text("+10", color = Color.White, fontSize = 20.sp) }
-                        TextButton(onClick = { onAuto(st) }) { Text("Volver a escuchar", color = Color(0xFF9CD0FF), fontSize = 16.sp) }
-                    }
-                }
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            when {
+                st.manual -> ManualBar(palette, actions.onFollowFromHere)
+                !following -> RecoverBar(palette, actions.onFollow, actions.onFollowFromHere)
+                st.auto -> AutoSpeedBar(st, palette, actions)
             }
-            if (!following) {
-                Button(
-                    onClick = onFollow,
-                    modifier = Modifier.padding(bottom = 14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(palette.accent), contentColor = Color.Black),
-                ) {
-                    Icon(Icons.Filled.MyLocation, null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Volver a donde voy", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                }
-            }
-            if (showHeard && st.heard.isNotBlank()) {
+            if (showHeard && st.heard.isNotBlank() && !st.manual) {
                 Text(
                     st.heard,
                     color = ink.copy(alpha = 0.6f),
@@ -532,10 +586,232 @@ private fun LiveOverlay(
     }
 }
 
+/** Black or white, whichever reads better on [background]. */
+private fun contentOn(background: Color): Color = if (background.luminance() > 0.45f) Color.Black else Color.White
+
+@Composable
+private fun ControlsBar(st: TalksSession.State, palette: ReaderPalette, locked: Boolean, a: LiveActions) {
+    val ink = Color(palette.text)
+    val accent = Color(palette.accent)
+    Surface(
+        shape = RoundedCornerShape(32.dp),
+        color = Color(palette.background).copy(alpha = 0.94f),
+        border = BorderStroke(1.dp, ink.copy(alpha = 0.16f)),
+        shadowElevation = 10.dp,
+    ) {
+        Row(
+            Modifier
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            ModeSwitch(st.manual, ink, accent, onVoice = { a.onManual(false) }, onManual = { a.onManual(true) })
+            BarDivider(ink)
+            if (!st.manual) {
+                val running = st.listening || st.auto
+                BarButton(
+                    if (running) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    if (running) "Pausa" else "Seguir", ink, accent, active = !running,
+                ) { a.onPauseResume(st) }
+                BarButton(Icons.Filled.Speed, "Auto", ink, accent, active = st.auto) { a.onAuto(st) }
+                BarDivider(ink)
+            }
+            BarGlyphButton(15, "Letra −", ink) { a.onFont(-4) }
+            BarGlyphButton(24, "Letra +", ink) { a.onFont(4) }
+            BarButton(Icons.Filled.Palette, "Colores", ink, accent) { a.onTheme() }
+            BarButton(if (locked) Icons.Filled.Lock else Icons.Filled.LockOpen, if (locked) "Bloqueado" else "Bloquear", ink, accent, active = locked) { a.onToggleLock() }
+            BarDivider(ink)
+            BarButton(Icons.Filled.Close, "Salir", ink, accent) { a.onFinish() }
+        }
+    }
+}
+
+/** Voice following or everything by hand: the one switch to reach for when something goes wrong. */
+@Composable
+private fun ModeSwitch(manual: Boolean, ink: Color, accent: Color, onVoice: () -> Unit, onManual: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(ink.copy(alpha = 0.08f))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        ModeSegment(Icons.Filled.RecordVoiceOver, "Voz", !manual, ink, accent, onVoice)
+        ModeSegment(Icons.Filled.PanTool, "Manual", manual, ink, accent, onManual)
+    }
+}
+
+@Composable
+private fun ModeSegment(icon: ImageVector, label: String, selected: Boolean, ink: Color, accent: Color, onClick: () -> Unit) {
+    val fg = if (selected) contentOn(accent) else ink
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) accent else Color.Transparent)
+            .clickable(onClickLabel = label, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.size(8.dp))
+        Text(label, color = fg, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun BarButton(icon: ImageVector, label: String, ink: Color, accent: Color, active: Boolean = false, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClickLabel = label, onClick = onClick)
+            .widthIn(min = 64.dp)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(if (active) accent else ink.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = label, tint = if (active) contentOn(accent) else ink, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.size(3.dp))
+        Text(label, color = ink.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1)
+    }
+}
+
+/** A text-size button: a small or a large "A". */
+@Composable
+private fun BarGlyphButton(glyphSp: Int, label: String, ink: Color, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClickLabel = label, onClick = onClick)
+            .widthIn(min = 64.dp)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(ink.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("A", color = ink, fontSize = glyphSp.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.size(3.dp))
+        Text(label, color = ink.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun BarDivider(ink: Color) {
+    Box(
+        Modifier
+            .padding(horizontal = 6.dp)
+            .width(1.dp)
+            .height(40.dp)
+            .background(ink.copy(alpha = 0.14f)),
+    )
+}
+
+/** Shown in manual mode: how it works, and the way back to following the voice. */
+@Composable
+private fun ManualBar(palette: ReaderPalette, onFollowFromHere: () -> Unit) {
+    val ink = Color(palette.text)
+    val accent = Color(palette.accent)
+    Surface(
+        Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp).widthIn(max = 860.dp),
+        shape = RoundedCornerShape(26.dp),
+        color = Color(palette.background).copy(alpha = 0.95f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.6f)),
+        shadowElevation = 10.dp,
+    ) {
+        Row(Modifier.padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.PanTool, null, tint = accent, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.size(14.dp))
+            Column(Modifier.weight(1f, fill = false)) {
+                Text("Modo manual", color = ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(
+                    "Desliza el texto con el dedo y lee en la línea marcada.",
+                    color = ink.copy(alpha = 0.75f), fontSize = 14.sp,
+                )
+            }
+            Spacer(Modifier.size(16.dp))
+            Button(
+                onClick = onFollowFromHere,
+                colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = contentOn(accent)),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+            ) {
+                Icon(Icons.Filled.RecordVoiceOver, null)
+                Spacer(Modifier.size(8.dp))
+                Text("Seguir con la voz desde aquí", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        }
+    }
+}
+
+/** After scrolling by hand while following: back to the marker, or carry on from where you looked. */
+@Composable
+private fun RecoverBar(palette: ReaderPalette, onBack: () -> Unit, onHere: () -> Unit) {
+    val ink = Color(palette.text)
+    val accent = Color(palette.accent)
+    Row(
+        Modifier.padding(bottom = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedButton(
+            onClick = onBack,
+            border = BorderStroke(1.5.dp, ink.copy(alpha = 0.4f)),
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(palette.background).copy(alpha = 0.9f), contentColor = ink),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+        ) {
+            Icon(Icons.Filled.MyLocation, null)
+            Spacer(Modifier.size(8.dp))
+            Text("Volver a donde voy", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        }
+        Button(
+            onClick = onHere,
+            colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = contentOn(accent)),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+        ) {
+            Icon(Icons.Filled.VerticalAlignCenter, null)
+            Spacer(Modifier.size(8.dp))
+            Text("Seguir desde aquí", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+    }
+}
+
+@Composable
+private fun AutoSpeedBar(st: TalksSession.State, palette: ReaderPalette, a: LiveActions) {
+    val ink = Color(palette.text)
+    Surface(
+        Modifier.padding(bottom = 16.dp),
+        shape = RoundedCornerShape(26.dp),
+        color = Color(palette.background).copy(alpha = 0.94f),
+        border = BorderStroke(1.dp, Blue.copy(alpha = 0.7f)),
+        shadowElevation = 8.dp,
+    ) {
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Speed, null, tint = Blue, modifier = Modifier.padding(start = 8.dp).size(24.dp))
+            TextButton(onClick = { a.onAutoSpeed(-10) }) { Text("−10", color = ink, fontSize = 20.sp) }
+            Text("${st.autoWpm} palabras/min", color = ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            TextButton(onClick = { a.onAutoSpeed(10) }) { Text("+10", color = ink, fontSize = 20.sp) }
+            TextButton(onClick = { a.onAuto(st) }) { Text("Volver a escuchar", color = Blue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+        }
+    }
+}
+
 @Composable
 private fun StatusPill(st: TalksSession.State, targetMinutes: Int, palette: ReaderPalette, modifier: Modifier) {
     val ink = Color(palette.text)
     val (color, label) = when {
+        st.manual -> Blue to "Manual"
         st.auto -> Blue to "Avance automático"
         st.error?.fatal == true -> Red to "Sin escucha"
         !st.listening -> Gray to "En pausa"
@@ -549,17 +825,20 @@ private fun StatusPill(st: TalksSession.State, targetMinutes: Int, palette: Read
     Row(
         modifier
             .clip(RoundedCornerShape(50))
-            .background(ink.copy(alpha = 0.14f))
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .background(Color(palette.background).copy(alpha = 0.9f))
+            .border(1.dp, ink.copy(alpha = 0.16f), RoundedCornerShape(50))
+            .padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(Modifier.size(12.dp).clip(CircleShape).background(color))
-        // Microphone level: proof that the room is being heard.
-        Box(Modifier.width(28.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(ink.copy(alpha = 0.18f))) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth(st.level.coerceIn(0.02f, 1f)).background(color))
+        if (!st.manual) {
+            // Microphone level: proof that the room is being heard.
+            Box(Modifier.width(28.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(ink.copy(alpha = 0.18f))) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(st.level.coerceIn(0.02f, 1f)).background(color))
+            }
         }
-        Text(label, color = ink.copy(alpha = 0.85f), fontSize = 14.sp)
+        Text(label, color = ink.copy(alpha = 0.9f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
         Text(formatClock(st.elapsedMs), color = ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         if (targetMinutes > 0 && st.progress > 0.03f) {
             // Seconds ahead of (+) or behind (-) the time planned for the part already read.
@@ -574,34 +853,6 @@ private fun StatusPill(st: TalksSession.State, targetMinutes: Int, palette: Read
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ControlButton(icon: ImageVector, description: String, ink: Color, highlighted: Boolean = false, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(56.dp)
-            .clip(CircleShape)
-            .background(if (highlighted) Amber else ink.copy(alpha = 0.16f))
-            .clickable(onClickLabel = description, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = description, tint = if (highlighted) Color.Black else ink, modifier = Modifier.size(28.dp))
-    }
-}
-
-@Composable
-private fun TextControl(text: String, ink: Color, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(56.dp)
-            .clip(CircleShape)
-            .background(ink.copy(alpha = 0.16f))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text, color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
     }
 }
 

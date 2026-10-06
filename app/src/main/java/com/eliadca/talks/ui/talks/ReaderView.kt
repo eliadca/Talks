@@ -60,6 +60,9 @@ data class ReaderConfig(
  * Shows the whole speech in large type and follows the speaker: what was said is dimmed, what to
  * say next is highlighted and underlined, and the text glides so that the current line stays at a
  * fixed height. Touching the text by hand pauses the following for a few seconds.
+ *
+ * In [manual] mode nothing moves by itself: the speaker scrolls, and a reading line marks the
+ * height where the current line should be, so the app can pick up from there later.
  */
 class ReaderView(context: Context) : ScrollView(context) {
 
@@ -90,6 +93,27 @@ class ReaderView(context: Context) : ScrollView(context) {
     /** True while the view is moving the text by itself. */
     var autoFollow = true
         private set
+
+    /** Everything automatic off: no following, no highlight; a reading line shows where to read. */
+    var manual: Boolean = false
+        private set
+
+    fun setManualMode(on: Boolean) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            post { setManualMode(on) }
+            return
+        }
+        if (manual == on) return
+        manual = on
+        handler.removeCallbacks(resumeFollowing)
+        animator?.cancel()
+        if (on) autoFollow = false
+        content.invalidate()
+        invalidate()
+    }
+
+    private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val guidePath = Path()
 
     private val resumeFollowing = Runnable { resumeFollow(animated = true) }
 
@@ -140,11 +164,26 @@ class ReaderView(context: Context) : ScrollView(context) {
             post { resumeFollow(animated) }
             return
         }
+        if (manual) return
         handler.removeCallbacks(resumeFollowing)
         val was = autoFollow
         autoFollow = true
         scrollToOffset(nextStart, animated)
         if (!was) listener?.onFollowResumed()
+    }
+
+    /** Text offset at the start of the line now at reading height: where the speaker is looking. */
+    fun readingLineOffset(): Int {
+        val l = content.layout ?: return 0
+        val y = scrollY + height * cfg.anchor + content.lineHeightPx() / 2f - content.padTop
+        val line = l.getLineForVertical(y.toInt().coerceAtLeast(0))
+        return l.getLineStart(line)
+    }
+
+    /** Scrolls by [lines] lines of text (negative goes back), for remotes and keys in manual mode. */
+    fun scrollLines(lines: Int) {
+        animator?.cancel()
+        smoothScrollBy(0, (lines * content.lineHeightPx()).toInt())
     }
 
     // ======================================================================================
@@ -188,6 +227,7 @@ class ReaderView(context: Context) : ScrollView(context) {
 
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
+        if (manual) return
         if (!programmaticScroll && t != oldt) {
             // The user is moving the text; stop following for a while.
             animator?.cancel()
@@ -212,6 +252,34 @@ class ReaderView(context: Context) : ScrollView(context) {
         super.onDetachedFromWindow()
     }
 
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        if (manual) drawReadingGuide(canvas)
+    }
+
+    /** The reading line of manual mode: a faint band across the screen with a pointer at each side. */
+    private fun drawReadingGuide(canvas: Canvas) {
+        val pal = cfg.palette
+        val lineH = content.lineHeightPx()
+        val top = scrollY + height * cfg.anchor
+        guidePaint.style = Paint.Style.FILL
+        guidePaint.color = (pal.accent and 0x00FFFFFF) or (0x24 shl 24)
+        canvas.drawRect(0f, top, width.toFloat(), top + lineH, guidePaint)
+        guidePaint.color = pal.accent
+        val size = lineH * 0.22f
+        val cy = top + lineH / 2f
+        guidePath.reset()
+        guidePath.moveTo(0f, cy - size)
+        guidePath.lineTo(size * 1.1f, cy)
+        guidePath.lineTo(0f, cy + size)
+        guidePath.close()
+        guidePath.moveTo(width.toFloat(), cy - size)
+        guidePath.lineTo(width - size * 1.1f, cy)
+        guidePath.lineTo(width.toFloat(), cy + size)
+        guidePath.close()
+        canvas.drawPath(guidePath, guidePaint)
+    }
+
     // ======================================================================================
     // The text
     // ======================================================================================
@@ -231,7 +299,11 @@ class ReaderView(context: Context) : ScrollView(context) {
 
         val padTop: Int get() = (this@ReaderView.height * cfg.anchor).toInt()
         private val padBottom: Int get() = (this@ReaderView.height * (1f - cfg.anchor)).toInt()
-        private val sideMargin: Float get() = fontPx() * 1.1f
+
+        /** The left margin holds the arrow that points at the next words; the right one is just a breath. */
+        private val sideMargin: Float get() = max(minMargin, fontPx() * 0.72f)
+        private val rightMargin: Float get() = max(minMargin, fontPx() * 0.4f)
+        private val minMargin: Float get() = resources.displayMetrics.density * 16f
 
         private val detector = GestureDetector(
             context,
@@ -275,7 +347,7 @@ class ReaderView(context: Context) : ScrollView(context) {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val w = MeasureSpec.getSize(widthMeasureSpec)
             if (w != builtWidth || layout == null) {
-                val textWidth = max(100, (w - 2 * sideMargin).toInt())
+                val textWidth = max(100, (w - sideMargin - rightMargin).toInt())
                 layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, textWidth)
                     .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                     .setLineSpacing(0f, cfg.lineSpacing)
@@ -297,10 +369,11 @@ class ReaderView(context: Context) : ScrollView(context) {
             canvas.save()
             canvas.translate(sideMargin, padTop.toFloat())
 
-            if (nextEnd > nextStart) drawChunkTint(canvas, l, pal)
+            val follow = !manual && nextEnd > nextStart
+            if (follow) drawChunkTint(canvas, l, pal)
             l.draw(canvas)
-            if (cfg.dimSpoken && spokenEnd > 0) drawDimmedPast(canvas, l, pal)
-            if (nextEnd > nextStart) {
+            if (!manual && cfg.dimSpoken && spokenEnd > 0) drawDimmedPast(canvas, l, pal)
+            if (follow) {
                 drawUnderline(canvas, l, pal)
                 drawMarker(canvas, l, pal)
             }
@@ -363,8 +436,8 @@ class ReaderView(context: Context) : ScrollView(context) {
         private fun drawMarker(canvas: Canvas, l: Layout, pal: ReaderPalette) {
             val len = l.text.length
             val line = l.getLineForOffset(nextStart.coerceIn(0, len))
-            val size = fontPx() * 0.42f
-            val cx = -sideMargin * 0.55f
+            val size = min(fontPx() * 0.42f, sideMargin * 0.62f)
+            val cx = -sideMargin * 0.5f
             val cy = (l.getLineTop(line) + l.getLineBottom(line)) / 2f
             fill.style = Paint.Style.FILL
             fill.color = pal.accent

@@ -63,9 +63,6 @@ jobs:
   ui-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 50
-    env:
-      # Which screenshots (ASCII renderings) to print in the log, comma separated; "all" prints everything.
-      SHOW_LABELS: "tablet-landscape,failure"
     steps:
       - uses: actions/checkout@v4
 
@@ -127,11 +124,14 @@ jobs:
             echo "--- $tag ---"
             grep -F "$tag" ui-log.txt | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ D //' | head -70 || true
           done
-          echo "=== SCREENSHOTS ($SHOW_LABELS) ==="
-          for label in ${SHOW_LABELS//,/ }; do
-            awk -v l="$label" '$0 ~ "===== "l" \\(" {p=1} p {print} $0 ~ "===== end "l" =====" {p=0}' ui-log.txt | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ I ASCII +: //' | head -80
-          done
           if [ "$(cat ui-status.txt 2>/dev/null)" != "0" ]; then echo "UI TESTS FAILED"; exit 1; fi
+
+      - name: Screenshots
+        if: always()
+        run: |
+          echo "=== SHOTS ==="
+          cat shots.txt 2>/dev/null | sed 's/^/SHOT /' || true
+          echo "=== END SHOTS ==="
 
       - name: Upload UI logs
         if: always()
@@ -141,6 +141,7 @@ jobs:
           path: |
             ui-log.txt
             ui-system.txt
+            shots.txt
             gradle-ui.log
             app/build/reports/androidTests/**
           if-no-files-found: ignore

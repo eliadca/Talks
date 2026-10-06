@@ -32,6 +32,7 @@ import com.eliadca.talks.core.sample.SampleContent
 import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.data.EngineKind
 import com.eliadca.talks.editor.RichEditText
+import com.eliadca.talks.ui.talks.ReaderView
 import com.eliadca.talks.speech.EngineState
 import com.eliadca.talks.speech.SpeechEngine
 import com.eliadca.talks.speech.SpeechEvent
@@ -77,7 +78,7 @@ class AppFlowTest {
                 .filter { Regex("ANR in|isn't responding|FATAL EXCEPTION|has died|am_crash|am_anr|Force finishing").containsMatchIn(it) }
                 .take(12).forEach { Log.i("TALKS_TEST", "sys: ${it.take(260)}") }
             try { compose.onRoot().printToLog("TALKS_TREE_FAIL") } catch (t: Throwable) { Log.i("TALKS_TEST", "no tree: ${t.message?.take(200)}") }
-            try { Ascii.shot("failure") } catch (_: Throwable) {}
+            try { Shots.take("failure") } catch (_: Throwable) {}
         }
     }
 
@@ -176,7 +177,7 @@ class AppFlowTest {
         val id = runBlocking { container.speeches.create("Mi primera charla", Markup.parse("Hola a todos")) }
         waitForText("Mi primera charla")
         compose.onRoot().printToLog("TALKS_TREE_HOME")
-        Ascii.shot("library")
+        Shots.take("library")
         assertTrue(id > 0)
     }
 
@@ -187,12 +188,11 @@ class AppFlowTest {
         compose.onAllNodesWithText("Para editar")[0].performClick()
 
         onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
-        Ascii.shot("editor-open")
 
         onView(isAssignableFrom(RichEditText::class.java)).perform(click(), typeText(" mundo"))
         compose.onNodeWithContentDescription("Negrita (Ctrl+B)").performClick()
         onView(isAssignableFrom(RichEditText::class.java)).perform(typeText(" fuerte"), closeSoftKeyboard())
-        Ascii.shot("editor-typed")
+        Shots.take("editor-typed")
 
         val saved = eventually(10_000) {
             runBlocking(Dispatchers.IO) {
@@ -216,14 +216,13 @@ class AppFlowTest {
         Log.i("TALKS_TEST", "landscape=$landscape size=${metrics.widthPixels}x${metrics.heightPixels} density=${metrics.density}")
         assertTrue("the tablet must be in landscape", landscape)
         compose.onRoot().printToLog("TALKS_TREE_TABLET")
-        Ascii.shot("tablet-landscape")
         // Sidebar, list and (empty) editor are all visible at once.
         assertShown("Papelera")
         assertShown("Nuevo discurso")
         assertShown("Elige un discurso")
         compose.onAllNodesWithText("Charla A")[0].performClick()
         onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
-        Ascii.shot("tablet-landscape-editing")
+        Shots.take("tablet-landscape-editing")
     }
 
     @Test
@@ -238,13 +237,12 @@ class AppFlowTest {
 
         compose.onNode(hasText("Talks") and hasClickAction()).performClick()
         waitForText("COMENZAR")
-        Ascii.shot("talks-prepare")
+        Shots.take("talks-prepare")
         compose.onRoot().printToLog("TALKS_TREE_PREPARE")
         compose.onNodeWithText("COMENZAR").performClick()
 
         // Nothing heard yet: listening, not yet following.
         waitForText("Escuchando")
-        Ascii.shot("talks-listening")
 
         // The speaker reads the first paragraph; the recogniser sends growing partial results.
         val words = com.eliadca.talks.core.track.ScriptIndex.build(practice.text).tokens.map { it.norm }
@@ -255,23 +253,35 @@ class AppFlowTest {
             Thread.sleep(120)
         }
         waitForText("Siguiendo")
-        Ascii.shot("talks-following")
+        Shots.take("talks-following")
         compose.onRoot().printToLog("TALKS_TREE_LIVE")
+
+        // Something goes badly wrong: the speaker turns everything automatic off and scrolls by hand.
+        if (compose.onAllNodes(hasText("Manual") and hasClickAction()).fetchSemanticsNodes().isEmpty()) {
+            onView(isAssignableFrom(ReaderView::class.java)).perform(click()) // a tap shows the controls
+        }
+        compose.onNode(hasText("Manual") and hasClickAction()).performClick()
+        waitForText("Modo manual")
+        // Whatever the recogniser still sends is ignored now.
+        fake.hear(words.take(70).joinToString(" "), final = true)
+        Thread.sleep(300)
+        Shots.take("talks-manual")
+        compose.onNodeWithText("Seguir con la voz desde aquí").performClick()
+        waitForText("Siguiendo")
 
         // The speaker improvises: the status says so and the place is kept.
         fake.hear("como les decia ayer en la reunion con el equipo de ventas y los clientes del norte y la verdad es que si", final = true)
         waitForText("Improvisando", timeoutMs = 10_000)
-        Ascii.shot("talks-improvising")
 
         // And reads the rest of the speech to the very end.
         fake.hear(words.drop(36).joinToString(" "), final = true)
         waitForText("Fin del discurso", timeoutMs = 20_000)
-        Ascii.shot("talks-finished")
+        Shots.take("talks-finished")
 
         compose.onNodeWithText("Terminar y ver resumen").performClick()
         waitForText("¿Terminar el modo Talks?")
         compose.onNode(hasText("Terminar") and hasClickAction()).performClick()
         waitForText("Sesión terminada")
-        Ascii.shot("talks-summary")
+        Shots.take("talks-summary")
     }
 }

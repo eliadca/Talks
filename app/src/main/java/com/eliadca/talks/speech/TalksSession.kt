@@ -71,6 +71,11 @@ class TalksSession(
         /** True while the text advances by itself at [autoWpm] instead of following the voice. */
         val auto: Boolean = false,
         val autoWpm: Int = 130,
+        /**
+         * True while everything automatic is off: nothing listens or moves the text, and the
+         * speaker scrolls by hand. The clock keeps running.
+         */
+        val manual: Boolean = false,
     )
 
     private val mutableState = MutableStateFlow(State())
@@ -157,8 +162,38 @@ class TalksSession(
         engine.start()
     }
 
+    /**
+     * Turns everything automatic off, for when something goes badly wrong on stage: the recogniser
+     * and automatic advance stop and the speaker moves the text by hand. The clock keeps running,
+     * since the speaker is still talking.
+     */
+    fun enterManual() {
+        if (mutableState.value.manual) return
+        autoJob?.cancel()
+        autoJob = null
+        if (mutableState.value.listening) engine.stop()
+        if (activeSince == 0L) activeSince = now()
+        mutableState.update { it.copy(manual = true, auto = false, listening = false, level = 0f, error = null) }
+    }
+
+    /** Back to following the voice, from script word [token]: where the speaker scrolled to. */
+    fun leaveManual(token: Int) {
+        if (!mutableState.value.manual) return
+        mutableState.update { it.copy(manual = false, listening = true, error = null) }
+        scope.launch(trackerDispatcher) {
+            tracker.setPosition(token)
+            publish(manual = true)
+        }
+        engine.start()
+    }
+
     /** Stops listening without ending the run (the clock stops too). */
     fun pause() {
+        if (mutableState.value.manual) {
+            activeMs = currentActiveMs()
+            activeSince = 0
+            return
+        }
         val wasAuto = mutableState.value.auto
         if (wasAuto) {
             autoJob?.cancel()
@@ -172,6 +207,10 @@ class TalksSession(
     }
 
     fun resume() {
+        if (mutableState.value.manual) {
+            if (activeSince == 0L) activeSince = now()
+            return
+        }
         if (mutableState.value.listening) return
         activeSince = now()
         mutableState.update { it.copy(listening = true, error = null) }
@@ -233,14 +272,16 @@ class TalksSession(
     private fun handle(event: SpeechEvent) {
         when (event) {
             is SpeechEvent.Partial -> {
+                if (mutableState.value.manual) return
                 tracker.onHypothesis(event.text, isFinal = false)
                 publish(manual = false, heard = event.text)
             }
             is SpeechEvent.Final -> {
+                if (mutableState.value.manual) return
                 tracker.onHypothesis(event.text, isFinal = true)
                 publish(manual = false, heard = event.text)
             }
-            is SpeechEvent.Level -> mutableState.update { it.copy(level = event.value) }
+            is SpeechEvent.Level -> if (!mutableState.value.manual) mutableState.update { it.copy(level = event.value) }
             is SpeechEvent.State -> mutableState.update {
                 // A recovered engine clears a transient error.
                 val clear = event.state == EngineState.LISTENING && it.error?.fatal == false
