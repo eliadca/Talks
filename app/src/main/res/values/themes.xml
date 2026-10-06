@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Talks" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Window theme: Compose draws everything, so only the window chrome matters. -->
+    <style name="Theme.Talks" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+
+    <!-- Themes for the Android text editor widget, so its cursor and selection handles match the app. -->
+    <style name="EditorTheme.Light" parent="android:Theme.Material.Light">
+        <item name="android:colorAccent">#3F4FD8</item>
+        <item name="android:colorControlActivated">#3F4FD8</item>
+        <item name="android:textColorHighlight">#553F4FD8</item>
+    </style>
+    <style name="EditorTheme.Dark" parent="android:Theme.Material">
+        <item name="android:colorAccent">#B7BEFF</item>
+        <item name="android:colorControlActivated">#B7BEFF</item>
+        <item name="android:textColorHighlight">#55B7BEFF</item>
+    </style>
 </resources>
