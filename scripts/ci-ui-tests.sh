@@ -6,8 +6,6 @@ set +e
 adb shell settings put global hide_error_dialogs 1
 # The one-time "Viewing full screen" hint of immersive mode would take the focus from the app.
 adb shell settings put secure immersive_mode_confirmations confirmed
-# The "copied" preview that Android 13+ shows after a copy would sit over the app during the tests.
-adb shell device_config put systemui clipboard_overlay_enabled false || true
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null

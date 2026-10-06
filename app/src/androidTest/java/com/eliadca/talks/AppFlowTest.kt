@@ -338,10 +338,14 @@ class AppFlowTest {
             assertTrue("imported speech has no $type: ${saved.doc.spans}", saved.doc.spans.any { it.type == type })
         }
         assertTrue(!saved.doc.text.contains("**") && !saved.doc.text.contains("```"))
+        // The emulator's screen lags behind the app; give the editor time to show the speech.
+        Thread.sleep(1500)
         Shots.take("imported-markdown")
 
         // ⋮ → Copiar como Markdown gives the same Markdown back (without the code fence).
         compose.onNodeWithContentDescription("Más opciones").performClick()
+        waitForText("Copiar como Markdown")
+        Shots.take("editor-menu")
         clickVisible("Copiar como Markdown")
         val copied = eventually { clipboardText().takeIf { it.startsWith("# Discurso de la IA") } }
         Log.i("TALKS_TEST", "copied as markdown='${copied.replace("\n", "\\n")}'")
