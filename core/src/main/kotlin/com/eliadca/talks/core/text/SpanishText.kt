@@ -40,22 +40,27 @@ object SpanishText {
         return sb.toString()
     }
 
-    /** Folds a whole string for substring search (keeps spaces, drops punctuation). */
+    /**
+     * Folds a whole string for substring search: lower-case, no accents, anything that is not a
+     * letter or digit becomes a space. The result always has exactly the same length as [text], so
+     * a match position in it is a position in the original.
+     */
     fun foldForSearch(text: String): String {
-        val lower = text.lowercase(Locale.ROOT)
-        val sb = StringBuilder(lower.length)
-        for (c in lower) {
+        val sb = StringBuilder(text.length)
+        for (original in text) {
+            val c = Character.toLowerCase(original)
             when {
                 c == 'ñ' -> sb.append('ñ')
                 c in 'a'..'z' || c in '0'..'9' -> sb.append(c)
-                c == 'á' || c == 'à' || c == 'â' || c == 'ä' -> sb.append('a')
+                c == 'á' || c == 'à' || c == 'â' || c == 'ä' || c == 'ã' -> sb.append('a')
                 c == 'é' || c == 'è' || c == 'ê' || c == 'ë' -> sb.append('e')
                 c == 'í' || c == 'ì' || c == 'î' || c == 'ï' -> sb.append('i')
-                c == 'ó' || c == 'ò' || c == 'ô' || c == 'ö' -> sb.append('o')
+                c == 'ó' || c == 'ò' || c == 'ô' || c == 'ö' || c == 'õ' -> sb.append('o')
                 c == 'ú' || c == 'ù' || c == 'û' || c == 'ü' -> sb.append('u')
+                c == 'ç' -> sb.append('c')
                 c.isLetterOrDigit() -> {
-                    val d = Normalizer.normalize(c.toString(), Normalizer.Form.NFD)
-                    sb.append(combiningMarks.replace(d, ""))
+                    val base = Normalizer.normalize(c.toString(), Normalizer.Form.NFD).firstOrNull()
+                    sb.append(if (base != null && base.isLetterOrDigit()) base else c)
                 }
                 else -> sb.append(' ')
             }

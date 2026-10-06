@@ -14,6 +14,14 @@ class SpanishTextTest {
         assertEquals("que", SpanishText.fold("¿Qué"))
     }
 
+    @Test fun foldForSearchKeepsLengthAndPositions() {
+        val text = "¿Cuántas DECISIONES, año 2024? Ñandú — İstanbul"
+        val folded = SpanishText.foldForSearch(text)
+        assertEquals(text.length, folded.length)
+        assertEquals(text.indexOf("DECISIONES"), folded.indexOf("decisiones"))
+        assertEquals("cuantas", folded.substring(1, 8))
+    }
+
     @Test fun phoneticMergesSoundAlikes() {
         val pairs = listOf(
             "vaca" to "baca", "hoy" to "oy", "llave" to "yabe", "cena" to "sena", "zapato" to "sapato",
