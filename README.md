@@ -12,13 +12,19 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 ### Modo Talks (lo principal)
 - **Sigue tu voz en español** y marca en pantalla la siguiente frase (subrayado grueso + resaltado + flecha en el margen).
   Lo ya dicho se atenúa y el texto se desplaza solo, manteniendo la línea actual a una altura fija con varias líneas por delante.
-- **Tolera la improvisación**: si dices palabras que no están en el guion, el marcador se queda donde lo dejaste (estado «Improvisando»)
-  y vuelve a engancharse cuando retomas el texto, aunque sea más adelante. Si te saltas párrafos o repites una frase, te encuentra de nuevo en pocas palabras.
+- **Tolera la improvisación y los cambios de tema**: si improvisas o hablas un buen rato de algo que no tiene nada que ver (saludos, una anécdota,
+  preguntas del público), el marcador **se queda quieto donde dejaste el texto** (estado «Improvisando») y vuelve a engancharse en cuanto retomas el guion,
+  aunque sea más adelante. El marcador solo se mueve cuando lo que oye coincide de verdad con el texto, en orden y con palabras significativas: las frases
+  comunes que casualmente aparecen en el guion («de la», «que no», «esta mañana») no lo arrastran. Si te saltas párrafos o repites una frase, te encuentra de nuevo en pocas palabras.
+- **Modo manual con un toque**: el interruptor **Voz / Manual** de la barra de controles (o la tecla «pantalla negra» de un mando de presentaciones, B o .)
+  desactiva todo lo automático. Desplazas el texto con el dedo y una **línea de lectura** marca dónde leer. Cuando quieras, **«Seguir con la voz desde aquí»**
+  retoma el seguimiento exactamente desde esa línea. Si deslizas el texto sin activar el modo manual, puedes elegir entre **«Volver a donde voy»** o **«Seguir desde aquí»**.
 - **Tolera los errores del reconocedor**: confusiones b/v, c/s/z, ll/y, h muda, plurales, números en cifras o en letras («2024» ↔ «dos mil veinticuatro»),
   palabras cortadas y fallos de reconocimiento.
-- **Respaldo manual siempre disponible** (por si algo falla en el escenario): *mantén pulsada* cualquier palabra para colocar el marcador ahí;
-  un **control remoto de presentaciones** (o las teclas de volumen, si lo activas) avanza/retrocede de frase en frase;
-  un botón de pausa; y un aviso claro si el micrófono o el reconocedor fallan.
+- **Más respaldo manual** (por si algo falla en el escenario): *mantén pulsada* cualquier palabra para seguir desde ahí;
+  un **control remoto de presentaciones** (o las teclas de volumen, si lo activas) avanza/retrocede de frase en frase (en modo manual, desplaza el texto);
+  un botón de pausa; y un aviso claro si el micrófono o el reconocedor fallan, con acceso directo al modo manual.
+- **El texto usa toda la pantalla**: márgenes estrechos y sin quedar tapado por la muesca de la cámara (en la Galaxy Tab Ultra queda en un lateral cuando la tablet está en vertical).
 - **Indicador de estado siempre visible**: punto verde/ámbar/rojo + medidor del micrófono + cronómetro (y cuánto vas adelantado o atrasado respecto a tu tiempo objetivo).
 - **Preparación**: comprueba micrófono y reconocedor, prueba de reconocimiento en vivo y elección del punto de inicio, antes de empezar.
 - **Dos motores de voz**:
@@ -28,15 +34,20 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 - Al terminar, guarda tu **ritmo real** (palabras por minuto) para estimar con precisión cuánto dura cada discurso.
 
 ### Editor
-- Negrita, cursiva, subrayado, tachado, color de texto, resaltado, tamaños, títulos, listas con viñetas / numeradas / de tareas (casillas tocables), citas,
-  alineación, sangría, deshacer/rehacer, buscar y reemplazar (ignora mayúsculas y acentos), esquema por títulos.
-- **Notas para ti**: lo que escribas entre `[corchetes]` (o marques con el botón «ojo») se ve atenuado y **no se espera que lo digas**: `[Pausa. Mirar al público.]`
+- Barra de formato agrupada: estilo de párrafo (Texto, Título grande, Título, Subtítulo), negrita, cursiva, subrayado, tachado, color de texto, resaltado,
+  tamaños, listas con viñetas / numeradas / de tareas (casillas tocables), citas, alineación y sangría.
+- Barra superior con deshacer/rehacer, buscar y reemplazar (ignora mayúsculas y acentos), esquema por títulos, versiones y un botón **Talks** destacado.
+  Mantén pulsado cualquier botón para ver qué hace. **«Escribir a pantalla completa»** pliega la lista de discursos.
+- **Notas para ti**: lo que escribas entre `[corchetes]` (o marques con el botón **Nota**) se ve como una etiqueta suave y **no se espera que lo digas**:
+  `[Pausa. Mirar al público.]`. Sin texto seleccionado, el botón Nota escribe `[ ]` y deja el cursor dentro.
 - Atajos de teclado: `Ctrl+B`, `Ctrl+I`, `Ctrl+U`, `Ctrl+Z`, `Ctrl+Y`, `Ctrl+F`, `Tab`.
 - Escritura a mano con el S Pen: el editor usa el motor de texto nativo de Android, así que «escribir a mano → texto» de One UI funciona.
 - Se pega siempre como texto plano (para que lo que ves sea lo que se guarda).
 
 ### Biblioteca
-- Diseño adaptable: **3 paneles en tablets grandes** (carpetas | lista | editor), 2 en medianas, 1 en teléfonos. Compatible con multiventana y DeX.
+- **Menú lateral plegado** en una barra estrecha (nuevo discurso, Todos, Fijados, Carpetas, Papelera y **Ajustes**). El menú completo se abre con el botón ☰
+  y **nunca se abre al deslizar**, así que moverte por un discurso no lo despliega por accidente.
+- Lista y editor lado a lado en horizontal; en vertical se turnan (lista → discurso → volver). Compatible con multiventana y DeX.
 - Carpetas con color, fijados, etiquetas de color, orden por modificación/creación/título/duración, búsqueda en todos los discursos, papelera (30 días con deshacer).
 - Tiempo estimado de cada discurso a tu ritmo real y **tiempo objetivo** con aviso si te pasas.
 - **Historial de versiones** automático (cada 10 min de edición) y versiones con nombre que nunca se borran; restaurar guarda antes el texto actual.
