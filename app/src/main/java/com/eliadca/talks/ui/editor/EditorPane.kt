@@ -93,6 +93,9 @@ fun EditorPane(
     }
     val c = vm.controller
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.flushNow() }
+    val words = vm.stats.words
+    val seconds = if (paceWpm > 0) words * 60 / paceWpm else 0
+    val target = item?.targetMinutes ?: 0
 
     var showMenu by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<EditorDialog?>(null) }
@@ -180,9 +183,6 @@ fun EditorPane(
         }
 
         // --- status line ---
-        val words = vm.stats.words
-        val seconds = if (paceWpm > 0) words * 60 / paceWpm else 0
-        val target = item?.targetMinutes ?: 0
         Row(
             Modifier
                 .fillMaxWidth()

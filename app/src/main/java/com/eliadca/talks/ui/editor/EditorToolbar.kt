@@ -18,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
 import androidx.compose.material.icons.automirrored.filled.FormatIndentIncrease
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
-import androidx.compose.material.icons.automirrored.filled.FormatListNumbered
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.CheckBox
@@ -30,6 +29,7 @@ import androidx.compose.material.icons.filled.FormatClear
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.FormatItalic
+import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.FormatUnderlined
@@ -102,7 +102,7 @@ fun FormatToolbar(c: EditorController, modifier: Modifier = Modifier) {
             ToolButton(Icons.AutoMirrored.Filled.FormatListBulleted, "Lista con viñetas", active = f.block == BlockType.BULLET) {
                 c.toggleBlock(BlockType.BULLET); c.focus()
             }
-            ToolButton(Icons.AutoMirrored.Filled.FormatListNumbered, "Lista numerada", active = f.block == BlockType.NUMBER) {
+            ToolButton(Icons.Filled.FormatListNumbered, "Lista numerada", active = f.block == BlockType.NUMBER) {
                 c.toggleBlock(BlockType.NUMBER); c.focus()
             }
             ToolButton(Icons.Filled.CheckBox, "Lista de tareas", active = f.block == BlockType.CHECK) {

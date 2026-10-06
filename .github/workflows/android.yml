@@ -24,14 +24,19 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Unit tests (engine + app)
-        run: ./gradlew --stacktrace :core:test :app:testDebugUnitTest
+      - name: Test and build
+        run: |
+          set -o pipefail
+          ./gradlew --console=plain :core:test :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease 2>&1 | tee build.log
 
-      - name: Build APKs
-        run: ./gradlew --stacktrace :app:assembleDebug :app:assembleRelease
+      - name: Error summary
+        if: failure()
+        run: |
+          echo "=== COMPILER / TEST ERRORS ==="
+          grep -E "^e: |^w: .*(Unresolved|Deprecated)|error:|FAILED|AssertionError|What went wrong|Execution failed" -A2 build.log | grep -v "^\s*at " | head -120
 
       - name: Lint
-        run: ./gradlew :app:lintDebug
+        run: ./gradlew --console=plain :app:lintDebug
         continue-on-error: true
 
       - name: Upload APKs
