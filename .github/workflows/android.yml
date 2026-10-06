@@ -82,6 +82,27 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # The SDK download is occasionally corrupted ("Error on ZipFile unknown archive"); retry it here so the
+      # emulator action below finds the packages already installed.
+      - name: Install emulator packages (with retries)
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          install() {
+            local pkg="$1"
+            for attempt in 1 2 3 4 5; do
+              sdkmanager --install "$pkg" > /tmp/sdk.log 2>&1 || true
+              if sdkmanager --list_installed 2>/dev/null | grep -Eq "^[[:space:]]*${pkg}[[:space:]]*\|"; then
+                echo "$pkg installed"
+                return 0
+              fi
+              echo "::warning::$pkg not installed (attempt $attempt): $(tail -2 /tmp/sdk.log | tr '\n' ' ')"
+              sleep 5
+            done
+            return 0
+          }
+          install "emulator"
+          install "system-images;android-34;google_apis;x86_64"
+
       - name: Instrumented tests on a tablet emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
