@@ -65,7 +65,7 @@ jobs:
     timeout-minutes: 50
     env:
       # Which screenshots (ASCII renderings) to print in the log, comma separated; "all" prints everything.
-      SHOW_LABELS: "tablet-landscape,talks-following"
+      SHOW_LABELS: "tablet-landscape,failure"
     steps:
       - uses: actions/checkout@v4
 
@@ -99,7 +99,11 @@ jobs:
           echo "=== UI TEST SUMMARY ==="
           grep -E "^e: |FAILED|AssertionError|Tests? .*(passed|failed)|BUILD (SUCCESSFUL|FAILED)|Exception" gradle-ui.log | head -60 || true
           echo "=== UI TREE / DIAGNOSTICS ==="
-          grep -E "TALKS_TEST|AndroidRuntime" ui-log.txt | head -80 || true
+          grep -E "TALKS_TEST|AndroidRuntime" ui-log.txt | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ //' | head -60 || true
+          for tag in TALKS_TREE_FAIL TALKS_TREE_TABLET; do
+            echo "--- $tag ---"
+            grep -F "$tag" ui-log.txt | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ D //' | head -90 || true
+          done
           echo "=== SCREENSHOTS ($SHOW_LABELS) ==="
           for label in ${SHOW_LABELS//,/ }; do
             awk -v l="$label" '$0 ~ "===== "l" \\(" {p=1} p {print} $0 ~ "===== end "l" =====" {p=0}' ui-log.txt | sed -E 's/^[0-9-]+ [0-9:.]+ +[0-9]+ +[0-9]+ I ASCII +: //' | head -80

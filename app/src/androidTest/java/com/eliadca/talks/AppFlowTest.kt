@@ -6,6 +6,7 @@ import android.content.Context
 import android.util.Log
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -45,6 +46,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 import org.junit.runner.RunWith
 
 /** Drives the real app on an emulator: library, editor, tablet layout and Talks mode. */
@@ -56,6 +59,17 @@ class AppFlowTest {
 
     @get:Rule(order = 1)
     val compose = createAndroidComposeRule<MainActivity>()
+
+    /** On failure, dump the failing line, the semantics tree and a coarse screenshot: the CI log is all that can be read remotely. */
+    @get:Rule(order = 2)
+    val onFailure = object : TestWatcher() {
+        override fun failed(e: Throwable, description: Description) {
+            Log.i("TALKS_TEST", "FAILED ${description.methodName}: ${e.message?.lineSequence()?.take(6)?.joinToString(" | ")}")
+            e.stackTrace.filter { it.className.startsWith("com.eliadca.talks") }.take(4).forEach { Log.i("TALKS_TEST", "  at $it") }
+            try { compose.onRoot().printToLog("TALKS_TREE_FAIL") } catch (t: Throwable) { Log.i("TALKS_TEST", "no tree: ${t.message?.take(200)}") }
+            try { Ascii.shot("failure") } catch (_: Throwable) {}
+        }
+    }
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
     private val container get() = context.container
@@ -87,7 +101,16 @@ class AppFlowTest {
     }
 
     private fun waitForText(text: String, timeoutMs: Long = 15_000) {
-        compose.waitUntil(timeoutMs) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        try {
+            compose.waitUntil(timeoutMs) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        } catch (e: ComposeTimeoutException) {
+            throw AssertionError("text '$text' did not appear within ${timeoutMs}ms")
+        }
+    }
+
+    private fun assertShown(text: String) {
+        val n = compose.onAllNodesWithText(text).fetchSemanticsNodes().size
+        assertTrue("'$text' should be on screen (found $n)", n > 0)
     }
 
     private fun <T> eventually(timeoutMs: Long = 8_000, block: () -> T?): T {
@@ -140,15 +163,21 @@ class AppFlowTest {
     @Test
     fun tabletLandscapeShowsFoldersListAndEditorSideBySide() {
         runBlocking { container.speeches.create("Charla A", Markup.parse("Texto de A")) }
-        InstrumentationRegistry.getInstrumentation().uiAutomation.setRotation(UiAutomation.ROTATION_FREEZE_90)
+        val rotated = InstrumentationRegistry.getInstrumentation().uiAutomation.setRotation(UiAutomation.ROTATION_FREEZE_90)
         waitForText("Charla A")
+        val metrics = { compose.activity.resources.displayMetrics }
+        val landscape = runCatching {
+            compose.waitUntil(10_000) { metrics().widthPixels > metrics().heightPixels }
+            true
+        }.getOrDefault(false)
         compose.waitForIdle()
+        Log.i("TALKS_TEST", "rotation requested=$rotated landscape=$landscape size=${metrics().widthPixels}x${metrics().heightPixels} density=${metrics().density}")
         compose.onRoot().printToLog("TALKS_TREE_TABLET")
         Ascii.shot("tablet-landscape")
         // Sidebar, list and (empty) editor are all visible at once.
-        compose.onNodeWithText("Nuevo discurso").assertExists()
-        compose.onNodeWithText("Papelera").assertExists()
-        compose.onNodeWithText("Elige un discurso").assertExists()
+        assertShown("Papelera")
+        assertShown("Nuevo discurso")
+        assertShown("Elige un discurso")
         compose.onAllNodesWithText("Charla A")[0].performClick()
         onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
         Ascii.shot("tablet-landscape-editing")
