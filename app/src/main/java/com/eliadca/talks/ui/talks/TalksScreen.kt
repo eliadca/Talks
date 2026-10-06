@@ -1079,46 +1079,58 @@ private fun CheckRow(ok: Boolean?, title: String, detail: String, action: @Compo
 private fun EndedPanel(vm: TalksViewModel, onAgain: () -> Unit, onExit: () -> Unit, modifier: Modifier) {
     val s = vm.summary
     Surface(
-        modifier.padding(24.dp).widthIn(max = 520.dp),
-        shape = RoundedCornerShape(28.dp),
+        modifier.padding(24.dp).widthIn(max = 640.dp),
+        shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 6.dp,
-        shadowElevation = 12.dp,
+        shadowElevation = 16.dp,
     ) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("Sesión terminada", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            if (s != null) {
-                StatLine("Tiempo hablando", formatClock(s.activeMs))
-                StatLine("Palabras cubiertas", "${s.wordsCovered} de ${s.totalWords} (${(s.completion * 100).toInt()} %)")
-                if (s.wpm > 0) {
-                    StatLine("Tu ritmo", "${s.wpm} palabras por minuto")
-                    Text(
-                        "Talks usará este ritmo para calcular cuánto dura cada discurso.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        "Fue demasiado corta para medir tu ritmo.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+        Column(Modifier.padding(28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.CheckCircle, null, tint = Green, modifier = Modifier.size(32.dp))
+                Spacer(Modifier.size(12.dp))
+                Column {
+                    Text("Sesión terminada", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    vm.speech?.title?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
+            if (s != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatTile(formatClock(s.activeMs), "Tiempo hablando", Modifier.weight(1f))
+                    StatTile("${(s.completion * 100).toInt()} %", "${s.wordsCovered} de ${s.totalWords} palabras", Modifier.weight(1f))
+                    StatTile(if (s.wpm > 0) "${s.wpm}" else "—", "Palabras por minuto", Modifier.weight(1f))
+                }
+                Text(
+                    if (s.wpm > 0) "Talks usará este ritmo para calcular cuánto dura cada discurso."
+                    else "Fue demasiado corta para medir tu ritmo.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onAgain, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = onAgain, modifier = Modifier.weight(1f).height(52.dp)) {
                     Icon(Icons.Filled.Replay, null, Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
+                    Spacer(Modifier.size(8.dp))
                     Text("Practicar de nuevo")
                 }
-                Button(onClick = onExit, modifier = Modifier.weight(1f)) { Text("Salir") }
+                Button(onClick = onExit, modifier = Modifier.weight(1f).height(52.dp)) { Text("Salir", fontWeight = FontWeight.SemiBold) }
             }
         }
     }
 }
 
 @Composable
-private fun StatLine(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+private fun StatTile(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.size(2.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
     }
 }
