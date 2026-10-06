@@ -25,8 +25,12 @@ import android.view.inputmethod.InputConnectionWrapper
 import android.widget.EditText
 import com.eliadca.talks.core.doc.Align
 import com.eliadca.talks.core.doc.BlockType
+import com.eliadca.talks.core.doc.Markup
 import com.eliadca.talks.core.doc.RichDoc
+import com.eliadca.talks.core.doc.replaceRange
+import com.eliadca.talks.core.doc.slice
 import com.eliadca.talks.core.text.SpanishText
+import com.eliadca.talks.export.Clipboard
 import com.eliadca.talks.editor.SpannableCodec.BLOCK_FLAGS
 import com.eliadca.talks.editor.SpannableCodec.END_MARKER
 import com.eliadca.talks.editor.SpannableCodec.INLINE_FLAGS
@@ -307,6 +311,26 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     }
 
     fun selectAllContent() = setSelection(0, contentLength)
+
+    /** Replaces the selection with [fragment], formatting included, as one step that can be undone. */
+    fun insertDocument(fragment: RichDoc) {
+        val (a, b) = selection()
+        beginFormatGroup()
+        val merged = toDocument().replaceRange(a, b, fragment)
+        quiet = true
+        internal {
+            setText(SpannableCodec.toSpannable(merged, style))
+            renumber()
+        }
+        val caret = min(a + fragment.text.length, contentLength)
+        setSelection(caret)
+        quiet = false
+        notifyHistory()
+        notifyChanged()
+        notifyFormat()
+        if (findQuery.isNotEmpty()) recomputeFind(keepIndex = false)
+        scrollToOffset(caret)
+    }
 
     // --- undo / redo --------------------------------------------------------------------------
 
@@ -838,9 +862,32 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     }
 
     override fun onTextContextMenuItem(id: Int): Boolean {
-        // Pasted text brings foreign styling that would not survive saving; always paste plain text.
-        if (id == android.R.id.paste) return super.onTextContextMenuItem(android.R.id.pasteAsPlainText)
+        when (id) {
+            android.R.id.copy, android.R.id.cut -> rememberCopied()
+            android.R.id.paste -> {
+                if (pasteWithFormatting()) return true
+                // Styling from other apps would not survive saving: anything else goes in as plain text.
+                return super.onTextContextMenuItem(android.R.id.pasteAsPlainText)
+            }
+        }
         return super.onTextContextMenuItem(id)
+    }
+
+    /** Remembers the formatting of what is copied, so that pasting it back into Talks keeps it. */
+    private fun rememberCopied() {
+        val (s, t) = selection()
+        if (t > s) RichClipboard.remember(toDocument().slice(s, t))
+    }
+
+    /**
+     * Pastes text copied in Talks with its formatting, and Markdown (a speech written by an AI
+     * assistant, say) as formatted text. Returns false for plain text, which pastes as usual.
+     */
+    private fun pasteWithFormatting(): Boolean {
+        val pasted = Clipboard.readText(context) ?: return false
+        val fragment = RichClipboard.documentFor(pasted) ?: Markup.parseIfMarkdown(pasted) ?: return false
+        insertDocument(fragment)
+        return true
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {

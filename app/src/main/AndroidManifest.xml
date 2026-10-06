@@ -36,17 +36,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- "Share to Talks": text from any app becomes a new speech. -->
+            <!-- "Share to Talks": text (Markdown keeps its formatting) or files become new speeches. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/*" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
                 <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
 
             <!-- "Open with Talks": Word, Markdown and text files. -->
@@ -56,6 +59,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
                 <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>

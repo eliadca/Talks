@@ -8,9 +8,83 @@ object SampleContent {
 
     const val PRACTICE_TITLE = "Las pequeñas decisiones (discurso de práctica)"
     const val WELCOME_TITLE = "Bienvenido a Talks"
+    const val AGENT_TEMPLATE_TITLE = "Plantilla para tu agente de discursos"
 
     val practice: RichDoc by lazy { Markup.parse(PRACTICE_MARKUP) }
     val welcome: RichDoc by lazy { Markup.parse(WELCOME_MARKUP) }
+
+    /** Kept exactly as typed, not parsed, so that copying the note copies the Markdown itself. */
+    val agentTemplate: RichDoc by lazy { RichDoc(AGENT_TEMPLATE) }
+
+    /**
+     * A prompt for the AI assistant that writes the user's speeches: every bit of Markdown Talks
+     * understands (see [Markup]), how to write for the voice tracker, and an example. A speech
+     * written this way and pasted into Talks keeps all its formatting.
+     */
+    const val AGENT_TEMPLATE = """# Plantilla: discursos para Talks
+
+Eres mi redactor de discursos. Leeré en voz alta lo que escribas con Talks, una app que me escucha, sigue por dónde voy y subraya lo que viene después. Entrégame siempre el discurso en el Markdown de Talks que te explico aquí, para que al pegarlo en la app conserve todo el formato.
+
+## Cómo entregarlo
+- Responde solo con el discurso: nada de comentarios antes ni después.
+- Empieza con el título en una línea `# Título`; Talks lo usa como nombre del discurso.
+- Cada párrafo va en una sola línea, sin saltos de línea dentro. Deja una línea en blanco entre párrafos.
+- No lo metas en un bloque de código.
+- Usa solo los formatos de la lista siguiente. Talks no muestra tablas, enlaces, imágenes, código, HTML ni emojis.
+
+## Formatos que entiende Talks
+- `# Título`, `## Sección` y `### Subsección`: la estructura del discurso (apertura, ideas, cierre). Los títulos no se leen en voz alta.
+- `**negrita**` (o `__negrita__`): lo que quiero remarcar con la voz.
+- `*cursiva*` (o `_cursiva_`): matices, títulos de obras o palabras en otro idioma.
+- `++subrayado++`: una idea clave.
+- `==resaltado==`: lo que no puedo olvidar; se ve en amarillo.
+- `~~tachado~~`: una frase opcional que puedo saltarme si voy justo de tiempo.
+- Los estilos se combinan: `***negrita y cursiva***`, `**==negrita resaltada==**`. Cada marca se abre y se cierra en la misma línea, pegada al texto: `**así**`, no `** así **`.
+- `[Texto entre corchetes]`: una nota para mí que no se dice en voz alta, como `[Pausa]`, `[Mirar al público]`, `[Sonreír]` o `[Mostrar la diapositiva 3]`. Talks la muestra en otro color y no espera que la diga. Cada nota cabe en una línea. No uses corchetes para nada más.
+- `- ` para viñetas (también `* ` o `+ `), `1. ` o `1) ` para listas numeradas, `- [ ] ` y `- [x] ` para listas de tareas. Para una sublista, pon dos espacios delante por cada nivel.
+- `> ` delante de una cita o una frase célebre.
+- `---` solo en una línea: un separador entre partes del discurso (se ve como · · ·).
+- Una barra invertida delante de un símbolo lo escribe tal cual: `\*`, `\_`, `\#`.
+
+## Escribir para la voz
+- Talks compara lo que digo con el texto: escribe las palabras tal como las voy a pronunciar.
+- Las cifras se entienden: 2024, 35.000, 3,5, 50 %, 1.º.
+- Nada de abreviaturas ni símbolos que se lean distinto: «doctor», «etcétera», «dólares» en vez de Dr., etc. o el signo del dólar.
+- Frases cortas y párrafos de dos a cuatro frases. Marca las pausas y los gestos con notas entre corchetes.
+- Calcula unas 130 palabras por minuto, sin contar títulos ni notas.
+
+## Ejemplo de entrega
+```
+# El valor de empezar
+[Respirar. Mirar al público antes de empezar.]
+
+## Apertura
+Buenos días a todos. Gracias por regalarme lo más valioso que tienen: **su tiempo**.
+
+¿Cuántas decisiones creen que han tomado hoy? [Pausa de tres segundos.]
+
+## Primera idea: el primer paso
+Hace años conocí a Marta. Un lunes cualquiera escribió *una sola página*. Mil quinientos días después, su libro tenía cuatrocientas páginas.
+
+> El primer paso no te lleva a donde quieres ir, pero te saca de donde estás.
+
+Tres preguntas para esta semana:
+1. ¿Qué paso pequeño puedo dar hoy?
+2. ¿Qué me lo impide?
+  - Escríbanlo esta noche en un papel.
+3. ¿Quién puede acompañarme?
+
+---
+
+## Cierre
+==Empiecen hoy, aunque sea con una página.== ++Lo pequeño, repetido, se vuelve enorme.++ ~~Y si alguien lo duda, que le pregunte a Marta.~~
+
+Muchas gracias. [Esperar los aplausos.]
+```
+
+## Tu encargo
+En mi siguiente mensaje te diré el tema, el público, la duración y el tono. Si falta algo importante, pregúntame antes de escribir. Si no te digo la duración, apunta a unos cinco minutos. Cuando entregues el discurso, responde solo con él.
+"""
 
     private const val WELCOME_MARKUP = """# Bienvenido a Talks
 Talks es tu libreta de discursos. Escribe, da formato y, cuando llegue el momento, activa el **modo Talks**: la app te escucha y va subrayando lo próximo que tienes que decir.
@@ -32,6 +106,12 @@ Talks es tu libreta de discursos. Escribe, da formato y, cuando llegue el moment
 - Títulos, listas, listas de tareas y citas desde la barra de formato.
 - Todo lo que escribas entre [corchetes] es una nota para ti: se ve, pero no se espera que lo digas. [Pausa. Mirar al público.]
 - Atajos con teclado: Ctrl+B, Ctrl+I, Ctrl+U, Ctrl+Z, Ctrl+Y, Ctrl+F.
+
+## Escribir con tu agente de IA
+- La nota «Plantilla para tu agente de discursos» le explica a tu IA todo el formato que entiende Talks. Cópiala desde **Importar → Copiar plantilla para tu IA** y pégala en tu agente.
+- Cuando te entregue un discurso, cópialo y pulsa **Importar → Pegar desde el portapapeles**: llega con sus títulos, negritas, listas y notas.
+- También puedes importar archivos .md, .txt o de Word, compartir texto desde otra app hacia Talks o pegar Markdown dentro de un discurso.
+- Para llevar un discurso a tu IA, usa **⋮ → Copiar como Markdown**.
 
 ## Tus discursos están a salvo
 - Se guardan solos mientras escribes y guardan versiones anteriores.

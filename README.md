@@ -42,7 +42,8 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
   `[Pausa. Mirar al público.]`. Sin texto seleccionado, el botón Nota escribe `[ ]` y deja el cursor dentro.
 - Atajos de teclado: `Ctrl+B`, `Ctrl+I`, `Ctrl+U`, `Ctrl+Z`, `Ctrl+Y`, `Ctrl+F`, `Tab`.
 - Escritura a mano con el S Pen: el editor usa el motor de texto nativo de Android, así que «escribir a mano → texto» de One UI funciona.
-- Se pega siempre como texto plano (para que lo que ves sea lo que se guarda).
+- **Pegar con formato**: el Markdown que pegues (por ejemplo, un discurso escrito por tu IA) llega con sus títulos, negritas, listas y notas;
+  lo que copies dentro de Talks se pega con su formato; el resto entra como texto plano. «Pegar como texto sin formato» deja los signos tal cual.
 
 ### Biblioteca
 - **Menú lateral plegado** en una barra estrecha (nuevo discurso, Todos, Fijados, Carpetas, Papelera y **Ajustes**). El menú completo se abre con el botón ☰
@@ -51,8 +52,29 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 - Carpetas con color, fijados, etiquetas de color, orden por modificación/creación/título/duración, búsqueda en todos los discursos, papelera (30 días con deshacer).
 - Tiempo estimado de cada discurso a tu ritmo real y **tiempo objetivo** con aviso si te pasas.
 - **Historial de versiones** automático (cada 10 min de edición) y versiones con nombre que nunca se borran; restaurar guarda antes el texto actual.
-- Exportar a **PDF** o compartir como texto; **importar** `.docx` (Word: títulos, negritas, listas…), `.md` y `.txt`;
+- **Importar** (botón de la lista y del menú): varios archivos `.md`, `.txt` o `.docx` a la vez (Word: títulos, negritas, listas…), o
+  **pegar desde el portapapeles** un discurso nuevo; también «Compartir → Talks» desde cualquier app, con texto o archivos.
+- Exportar a **PDF**, compartir como texto o **como Markdown** y **copiar como Markdown** (⋮ del editor);
   **copia de seguridad** completa en un solo archivo y restauración sin duplicados.
+
+### Escribir con tu agente de IA
+La nota **«Plantilla para tu agente de discursos»** es un *prompt* listo para copiar: le explica a tu IA (ChatGPT, Claude, Gemini…) todo el Markdown
+que entiende Talks, cómo escribir para el seguimiento por voz y un ejemplo. Cópiala con **Importar → Copiar plantilla para tu IA** (o ⋮ → Copiar como
+Markdown), pégala en tu agente y pídele el discurso. Después copia su respuesta y usa **Importar → Pegar desde el portapapeles**: el discurso llega
+con todo su formato y con el título de su primera línea. Para que tu IA revise un discurso, ⋮ → **Copiar como Markdown** y pégaselo.
+
+| Escribes | En Talks |
+|---|---|
+| `# Título`, `## Sección`, `### Subsección` | Títulos (no se leen en voz alta; `####` o más cuentan como `###`) |
+| `**negrita**` o `__negrita__`, `*cursiva*` o `_cursiva_` | Negrita, cursiva (se combinan: `***las dos***`) |
+| `++subrayado++`, `~~tachado~~`, `==resaltado==` | Subrayado, tachado, resaltado amarillo |
+| `[Pausa. Mirar al público.]` | Nota para ti: se ve, pero no se espera que la digas |
+| `- ` / `* ` / `+ `, `1. ` / `1) `, `- [ ] ` / `- [x] ` | Viñetas, lista numerada, lista de tareas (2 espacios por nivel de sublista) |
+| `> cita` | Cita |
+| `---` solo en una línea | Separador centrado `· · ·` |
+| `\*`, `\_`, `\#` | El signo tal cual |
+
+Cada línea es un párrafo. Si la IA envuelve su respuesta en un bloque de código, usa enlaces o imágenes, Talks lo limpia al importar.
 
 ---
 
@@ -111,7 +133,7 @@ app/    Android: Compose (biblioteca, ajustes, modo Talks), editor basado en Edi
 - Hay un gancho de pruebas, `AppContainer.speechEngineFactory`, para inyectar un reconocedor falso.
 
 ### Qué está verificado y qué no
-Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 119 pruebas automáticas (55 del motor, 64 con Robolectric) más 7 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
+Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 146 pruebas automáticas (73 del motor, 73 con Robolectric) más 8 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
 
 - **Seguimiento de voz** (`:core:test`, simulador de orador con reconocimiento defectuoso): el marcador se mantiene en su sitio en >99,5 % de las lecturas sin errores,
   >97 % con un 6 % de palabras mal reconocidas y un 3 % perdidas, >90 % con un 15 % mal reconocidas, >92 % improvisando frases nuevas y >90 % si lo improvisado reutiliza palabras del guion.
@@ -121,9 +143,12 @@ Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 119 pruebas au
   el marcador se queda quieto donde dejaste el texto en ≥97 % de las digresiones (deriva máxima de 6–9 palabras; antes de esta versión, solo en el 4–9 % y podía
   saltar cientos de palabras) y te vuelve a encontrar en 0–4 palabras cuando retomas el guion.
 - **Editor, lector y sesión de Talks** (Robolectric): formato, listas, deshacer/rehacer, buscar y reemplazar, el lector (resaltado, desplazamiento, actualizaciones desde otros hilos),
-  la sesión de Talks con un motor de voz simulado (seguimiento, improvisación, pausa, reintento, avance automático), base de datos, copias de seguridad e importación de Word/Markdown.
-- **App real en un emulador de tablet** (Pixel Tablet, Android 14, 7 pruebas, con capturas de pantalla reales en cada ejecución): abre la biblioteca; escribe y pone negrita en el editor real
-  comprobando lo guardado; en horizontal muestra menú plegado, lista y editor, pliega la lista a pantalla completa y abre el menú completo; en vertical lista y editor se turnan
+  la sesión de Talks con un motor de voz simulado (seguimiento, improvisación, pausa, reintento, avance automático), base de datos, copias de seguridad e importación de Word/Markdown,
+  y pegar Markdown o texto copiado en Talks con su formato (un solo paso para deshacer).
+- **Markdown** (`:core:test`): lo que exporta Talks se vuelve a importar idéntico (muestras incluidas), los signos sueltos se escapan, el Markdown típico de una IA
+  (bloques de código, `####`, `__negrita__`, enlaces) se importa limpio, y la plantilla para tu IA explica cada formato y su ejemplo los usa todos.
+- **App real en un emulador de tablet** (Pixel Tablet, Android 14, 8 pruebas, con capturas de pantalla reales en cada ejecución): abre la biblioteca; escribe y pone negrita en el editor real
+  comprobando lo guardado; pega desde el portapapeles la respuesta de una IA en Markdown (llega con títulos, negrita y listas), la copia de vuelta como Markdown y abre la plantilla para tu IA; en horizontal muestra menú plegado, lista y editor, pliega la lista a pantalla completa y abre el menú completo; en vertical lista y editor se turnan
   y **deslizar sobre el discurso no abre el menú lateral**; abre los ajustes desde el menú; carga las librerías nativas de Vosk; y recorre todo el modo Talks
   (preparación → «Escuchando» → «Siguiendo» → **modo manual** → «Seguir con la voz desde aquí» → «Improvisando» → «Fin del discurso» → resumen).
 - **No verificable sin un dispositivo físico con micrófono**: la calidad real del reconocimiento del servicio de Android/Google o de Vosk en tu tablet y con tu micrófono

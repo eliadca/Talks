@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
@@ -87,11 +88,13 @@ fun SpeechListPane(
     onRestore: (Long) -> Unit,
     onDeleteForever: (SpeechListItem) -> Unit,
     onEmptyTrash: () -> Unit,
+    importActions: ImportActions,
     modifier: Modifier = Modifier,
 ) {
     val isTrash = filter == LibraryFilter.Trash
     val folderById = remember(folders) { folders.associateBy { it.id } }
     var sortMenu by remember { mutableStateOf(false) }
+    var importMenu by remember { mutableStateOf(false) }
 
     Column(modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
         Row(
@@ -120,6 +123,10 @@ fun SpeechListPane(
                 )
             }
             if (!isTrash) {
+                Box {
+                    TipIconButton(Icons.Filled.FileDownload, "Importar (archivos, portapapeles)") { importMenu = true }
+                    ImportMenu(importMenu, { importMenu = false }, importActions)
+                }
                 Box {
                     TipIconButton(Icons.AutoMirrored.Filled.Sort, "Ordenar") { sortMenu = true }
                     DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
@@ -176,8 +183,14 @@ fun SpeechListPane(
                     isTrash -> EmptyState(Icons.Filled.Delete, "La papelera está vacía", "Los discursos que elimines aparecerán aquí durante 30 días.")
                     query.isNotBlank() -> EmptyState(Icons.Filled.Search, "Sin resultados", "Ningún discurso contiene «$query». La búsqueda ignora mayúsculas y acentos.")
                     else -> EmptyState(
-                        Icons.Filled.Description, "Aún no hay discursos aquí", "Crea tu primer discurso y practícalo con el modo Talks.",
-                        action = { TextButton(onClick = onNew) { Text("Nuevo discurso") } },
+                        Icons.Filled.Description, "Aún no hay discursos aquí",
+                        "Crea tu primer discurso, o trae uno de un archivo o de tu IA, y practícalo con el modo Talks.",
+                        action = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = onNew) { Text("Nuevo discurso") }
+                                TextButton(onClick = { importMenu = true }) { Text("Importar") }
+                            }
+                        },
                     )
                 }
             }

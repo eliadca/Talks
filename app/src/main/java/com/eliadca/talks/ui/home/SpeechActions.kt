@@ -10,6 +10,9 @@ class SpeechActions(
     val setTargetMinutes: (Int) -> Unit,
     val exportPdf: () -> Unit,
     val shareText: () -> Unit,
+    /** Copies the speech as Markdown, ready to hand to an AI assistant or to paste back later. */
+    val copyMarkdown: () -> Unit,
+    val shareMarkdown: () -> Unit,
     val saveVersion: (String) -> Unit,
     val restoreVersion: (Long) -> Unit,
     val deleteVersion: (Long) -> Unit,

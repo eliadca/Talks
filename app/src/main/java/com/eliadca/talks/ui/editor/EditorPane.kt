@@ -81,6 +81,8 @@ import com.eliadca.talks.editor.EditorStyle
 import com.eliadca.talks.editor.RichEditText
 import com.eliadca.talks.ui.home.SpeechActions
 import com.eliadca.talks.ui.home.formatDuration
+import androidx.compose.material.icons.filled.CopyAll
+import androidx.compose.material.icons.filled.TextFields
 
 /** The open speech: title, formatting bar, page and status line. */
 @Composable
@@ -197,8 +199,18 @@ fun EditorPane(
                         onClick = { showMenu = false; vm.flushNow(); actions.duplicate() },
                     )
                     DropdownMenuItem(
-                        text = { Text("Compartir como texto") },
+                        text = { Text("Copiar como Markdown") },
+                        leadingIcon = { Icon(Icons.Filled.CopyAll, null) },
+                        onClick = { showMenu = false; vm.flushNow(); actions.copyMarkdown() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Compartir como Markdown") },
                         leadingIcon = { Icon(Icons.Filled.Share, null) },
+                        onClick = { showMenu = false; vm.flushNow(); actions.shareMarkdown() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Compartir como texto") },
+                        leadingIcon = { Icon(Icons.Filled.TextFields, null) },
                         onClick = { showMenu = false; vm.flushNow(); actions.shareText() },
                     )
                     DropdownMenuItem(

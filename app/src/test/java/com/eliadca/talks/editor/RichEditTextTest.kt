@@ -1,5 +1,7 @@
 package com.eliadca.talks.editor
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.view.KeyEvent
 import androidx.test.core.app.ApplicationProvider
@@ -350,6 +352,61 @@ class RichEditTextTest {
     @Test fun emptyDocumentHasOneEmptyParagraph() {
         assertEquals("", doc().text)
         assertEquals(1, doc().paragraphs().size)
+    }
+
+    // --- pasting ---------------------------------------------------------------------------------
+
+    private fun putOnClipboard(text: String) {
+        val cm = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
+        cm.setPrimaryClip(ClipData.newPlainText("test", text))
+    }
+
+    @Test fun pastedMarkdownArrivesFormatted() {
+        edit.loadDocument(Markup.parse("Antes"))
+        edit.setSelection(edit.contentLength)
+        type("\n")
+        putOnClipboard("# Mi charla\nHola **a todos** [Pausa]\n- uno\n- dos")
+        assertTrue(edit.onTextContextMenuItem(android.R.id.paste))
+        val d = doc()
+        assertEquals("Antes\nMi charla\nHola a todos [Pausa]\nuno\ndos", d.text)
+        assertEquals(listOf(BlockType.NORMAL, BlockType.H1, BlockType.NORMAL, BlockType.BULLET, BlockType.BULLET), blocks())
+        val bold = d.spans.single { it.type == SpanType.BOLD }
+        assertEquals("a todos", d.text.substring(bold.start, bold.end))
+        assertEquals(d.text.length, edit.selectionStart)
+    }
+
+    @Test fun pastingMarkdownIsOneStepToUndo() {
+        type("Hola ")
+        putOnClipboard("**mundo**")
+        edit.onTextContextMenuItem(android.R.id.paste)
+        assertEquals(Markup.parse("Hola **mundo**"), doc())
+        edit.undo()
+        assertEquals("Hola ", doc().text)
+        assertTrue(doc().spans.isEmpty())
+    }
+
+    @Test fun plainTextIsPastedAsItIs() {
+        type("Hola ")
+        putOnClipboard("mundo [pausa] 2 * 3")
+        edit.onTextContextMenuItem(android.R.id.paste)
+        assertEquals("Hola mundo [pausa] 2 * 3", doc().text)
+        assertTrue(doc().spans.isEmpty())
+    }
+
+    @Test fun pastingAsPlainTextKeepsTheMarkdownSigns() {
+        putOnClipboard("**literal**")
+        edit.onTextContextMenuItem(android.R.id.pasteAsPlainText)
+        assertEquals("**literal**", doc().text)
+    }
+
+    @Test fun textCopiedInTheEditorPastesBackWithItsFormatting() {
+        edit.loadDocument(Markup.parse("**Hola** mundo\nfin"))
+        edit.setSelection(0, 10)
+        edit.onTextContextMenuItem(android.R.id.copy)
+        edit.setSelection(edit.contentLength)
+        type("\n")
+        edit.onTextContextMenuItem(android.R.id.paste)
+        assertEquals(Markup.parse("**Hola** mundo\nfin\n**Hola** mundo"), doc())
     }
 
     @Test fun selectingAllAndDeletingKeepsTheEditorUsable() {

@@ -54,6 +54,8 @@ data class AppSettings(
     val editorSerif: Boolean = false,
 
     val seeded: Boolean = false,
+    /** The note with the template for an AI assistant has been added (once, also on older installs). */
+    val templateSeeded: Boolean = false,
 )
 
 /** Spanish variants offered for recognition: tag to display name. */
@@ -107,6 +109,7 @@ class SettingsRepository(private val context: Context) {
         val editorFontSp = intPreferencesKey("editorFontSp")
         val editorSerif = booleanPreferencesKey("editorSerif")
         val seeded = booleanPreferencesKey("seeded")
+        val templateSeeded = booleanPreferencesKey("templateSeeded")
     }
 
     private val defaults = AppSettings(language = defaultLanguage())
@@ -139,6 +142,7 @@ class SettingsRepository(private val context: Context) {
             editorFontSp = (p[K.editorFontSp] ?: d.editorFontSp).coerceIn(12, 36),
             editorSerif = p[K.editorSerif] ?: d.editorSerif,
             seeded = p[K.seeded] ?: d.seeded,
+            templateSeeded = p[K.templateSeeded] ?: d.templateSeeded,
         )
     }
 
@@ -167,6 +171,7 @@ class SettingsRepository(private val context: Context) {
             p[K.editorFontSp] = s.editorFontSp
             p[K.editorSerif] = s.editorSerif
             p[K.seeded] = s.seeded
+            p[K.templateSeeded] = s.templateSeeded
         }
     }
 

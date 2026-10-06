@@ -50,6 +50,33 @@ class ImporterTest {
         assertTrue(r.doc.spans.any { it.type == SpanType.BOLD })
     }
 
+    @Test fun textFilesAreReadAsMarkdownAndNamedByTheirTitle() = runBlocking {
+        val r = importer.read(temp("respuesta.txt", "# Mi charla\n**Hola** a todos [Pausa]\n- uno".toByteArray()))
+        assertEquals("Mi charla", r.title)
+        assertEquals("Mi charla\nHola a todos [Pausa]\nuno", r.doc.text)
+        assertEquals(listOf(BlockType.H1, BlockType.NORMAL, BlockType.BULLET), r.doc.paragraphs().map { it.block })
+    }
+
+    @Test fun anAssistantsAnswerImportsCleanly() = runBlocking {
+        val answer = "```markdown\n# Discurso\n#### Idea\n__Clave__ y [enlace](https://x.com)\n```\n"
+        val r = importer.read(temp("discurso.md", answer.toByteArray()))
+        assertEquals("Discurso", r.title)
+        assertEquals("Discurso\nIdea\nClave y enlace\n", r.doc.text)
+        assertTrue(r.doc.spans.any { it.type == SpanType.BOLD })
+    }
+
+    @Test fun windowsUnicodeTextIsRead() = runBlocking {
+        val bytes = byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + "Hola ñandú".toByteArray(Charsets.UTF_16LE)
+        assertEquals("Hola ñandú", importer.read(temp("unicode.txt", bytes)).doc.text)
+    }
+
+    @Test fun pdfAndBinaryFilesAreRefusedWithAClearMessage() {
+        val pdf = runCatching { runBlocking { importer.read(temp("charla.pdf", "%PDF-1.7 ...".toByteArray())) } }
+        assertTrue(pdf.exceptionOrNull()?.message.orEmpty().contains("PDF"))
+        val binary = runCatching { runBlocking { importer.read(temp("foto.jpg", byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0, 0, 1, 2))) } }
+        assertTrue(binary.exceptionOrNull()?.message.orEmpty().contains("no es un archivo de texto"))
+    }
+
     @Test fun wordDocumentKeepsHeadingsStylesAndLists() = runBlocking {
         val w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         val document = """<?xml version="1.0" encoding="UTF-8"?>

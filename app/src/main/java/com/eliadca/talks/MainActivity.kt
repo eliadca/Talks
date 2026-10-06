@@ -14,9 +14,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
-import androidx.lifecycle.lifecycleScope
-import com.eliadca.talks.core.doc.RichDoc
-import com.eliadca.talks.core.doc.firstLine
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -25,7 +22,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.export.Exporter
-import com.eliadca.talks.export.Importer
 import com.eliadca.talks.ui.editor.EditorViewModel
 import com.eliadca.talks.ui.home.HomeScreen
 import com.eliadca.talks.ui.home.HomeViewModel
@@ -57,29 +53,25 @@ class MainActivity : ComponentActivity() {
         handleIncoming(intent)
     }
 
-    /** Creates a speech from text or a file shared/opened from another app. */
+    /**
+     * Creates speeches from text or files shared with or opened in Talks. Markdown (from an AI
+     * assistant, for instance) keeps its formatting.
+     */
     private fun handleIncoming(intent: Intent?) {
-        val action = intent?.action
-        if (intent == null || (action != Intent.ACTION_SEND && action != Intent.ACTION_VIEW)) return
-        lifecycleScope.launch {
-            try {
-                val repo = application.container.speeches
-                val uri: Uri? = if (action == Intent.ACTION_VIEW) intent.data
-                else IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-                val id = if (uri != null) {
-                    val imported = Importer(contentResolver).read(uri)
-                    repo.create(imported.title, imported.doc)
+        when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data?.let { home.importFiles(listOf(it)) }
+            Intent.ACTION_SEND -> {
+                val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                if (uri != null) {
+                    home.importFiles(listOf(uri))
                 } else {
-                    val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() } ?: return@launch
-                    val title = intent.getStringExtra(Intent.EXTRA_SUBJECT)?.takeIf { it.isNotBlank() }
-                        ?: RichDoc(text).firstLine()
-                    repo.create(title, RichDoc(text.replace("\r\n", "\n")))
+                    val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() } ?: return
+                    home.importText(text, intent.getStringExtra(Intent.EXTRA_SUBJECT), "Discurso importado")
                 }
-                home.setFilter(LibraryFilter.All)
-                home.select(id)
-                home.toast("Discurso importado")
-            } catch (e: Exception) {
-                home.toast(e.message ?: "No se pudo importar el archivo.")
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                val uris = IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                if (!uris.isNullOrEmpty()) home.importFiles(uris)
             }
         }
     }
@@ -113,19 +105,11 @@ private fun TalksRoot() {
                     dark = dark,
                     onStartTalks = { id -> nav.navigate("talks/$id") },
                     onOpenSettings = { nav.navigate("settings") },
-                    onExportPdf = { id ->
-                        scope.launch {
-                            val speech = container.speeches.load(id) ?: return@launch
-                            val intent = exporter.pdfIntent(speech.title, speech.doc)
-                            context.startActivity(intent)
-                        }
+                    onExportPdf = { title, doc ->
+                        scope.launch { context.startActivity(exporter.pdfIntent(title, doc)) }
                     },
-                    onShareText = { id ->
-                        scope.launch {
-                            val speech = container.speeches.load(id) ?: return@launch
-                            context.startActivity(exporter.textIntent(speech.title, speech.doc))
-                        }
-                    },
+                    onShareText = { title, doc -> context.startActivity(exporter.textIntent(title, doc)) },
+                    onShareMarkdown = { title, markdown -> context.startActivity(exporter.markdownIntent(title, markdown)) },
                 )
             }
             composable("settings") {
@@ -133,9 +117,9 @@ private fun TalksRoot() {
                     settings = settings,
                     onChange = { change -> scope.launch { container.settings.update(change) } },
                     onBack = { nav.popBackStack() },
-                    onImported = { id ->
+                    onImportFiles = { uris ->
                         home.setFilter(LibraryFilter.All)
-                        home.select(id)
+                        home.importFiles(uris)
                         nav.popBackStack()
                     },
                 )

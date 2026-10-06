@@ -34,6 +34,16 @@ class Exporter(private val context: Context) {
         return Intent.createChooser(send, "Compartir discurso")
     }
 
+    /** A chooser that sends the speech as Markdown text, for an AI assistant or a notes app. */
+    fun markdownIntent(title: String, markdown: String): Intent {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, title)
+            putExtra(Intent.EXTRA_TEXT, markdown)
+        }
+        return Intent.createChooser(send, "Compartir como Markdown")
+    }
+
     /** Writes a PDF of the speech to the cache and returns a chooser that shares it. */
     suspend fun pdfIntent(title: String, doc: RichDoc): Intent {
         val file = withContext(Dispatchers.Default) { writePdf(title, doc) }

@@ -28,7 +28,7 @@ import com.eliadca.talks.BuildConfig
 import com.eliadca.talks.container
 import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.data.BackupManager
-import com.eliadca.talks.export.Importer
+import android.net.Uri
 import com.eliadca.talks.ui.talks.ModelControls
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -41,13 +41,12 @@ fun SettingsRoute(
     settings: AppSettings,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onBack: () -> Unit,
-    onImported: (Long) -> Unit,
+    onImportFiles: (List<Uri>) -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
     val scope = rememberCoroutineScope()
     val backup = remember { BackupManager(container.database, context.contentResolver) }
-    val importer = remember { Importer(context.contentResolver) }
     val model = container.voskModel
     val voskInstalled by model.installed.collectAsState()
 
@@ -73,17 +72,8 @@ fun SettingsRoute(
             }
         }
     }
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            try {
-                val imported = importer.read(uri)
-                val id = container.speeches.create(imported.title, imported.doc)
-                toast("Importado «${imported.title}».")
-                onImported(id)
-            } catch (e: Exception) {
-                toast(e.message ?: "No se pudo importar el archivo.")
-            }
-        }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) onImportFiles(uris)
     }
     val modelImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) model.importZip(uri)
@@ -117,11 +107,12 @@ fun SettingsRoute(
                     restoreLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-                ActionRow("Importar un archivo", "Crea un discurso a partir de un documento de Word (.docx), de Markdown (.md) o de texto (.txt).") {
+                ActionRow("Importar archivos", "Crea un discurso por cada archivo de Markdown (.md), texto (.txt) o Word (.docx). El Markdown conserva títulos, estilos, listas y notas.") {
                     importLauncher.launch(
                         arrayOf(
+                            "text/markdown", "text/x-markdown", "text/plain",
                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            "text/plain", "text/markdown", "application/octet-stream", "*/*",
+                            "application/octet-stream", "*/*",
                         ),
                     )
                 }

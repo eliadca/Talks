@@ -1,21 +1,30 @@
 package com.eliadca.talks.ui.home
 
 import android.app.Application
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.eliadca.talks.container
+import com.eliadca.talks.core.doc.Markup
+import com.eliadca.talks.core.doc.firstLine
+import com.eliadca.talks.core.doc.leadingTitle
+import com.eliadca.talks.core.doc.toMarkdown
+import com.eliadca.talks.core.sample.SampleContent
 import com.eliadca.talks.data.db.FolderEntity
 import com.eliadca.talks.data.db.SpeechListItem
 import com.eliadca.talks.data.db.VersionItem
+import com.eliadca.talks.export.Clipboard
+import com.eliadca.talks.export.Importer
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -160,6 +169,88 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             _query.value = ""
             _selectedId.value = id
         }
+    }
+
+    // --- importing ----------------------------------------------------------------------------
+
+    /** Creates a speech from each file (Markdown, text or Word), keeping its formatting, and opens the last one. */
+    fun importFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val importer = Importer(getApplication<Application>().contentResolver)
+            val folder = (filter.value as? LibraryFilter.Folder)?.id
+            var lastId: Long? = null
+            var lastTitle = ""
+            var imported = 0
+            var problem: String? = null
+            for (uri in uris) {
+                try {
+                    val speech = importer.read(uri)
+                    lastId = repo.create(speech.title, speech.doc, folderId = folder)
+                    lastTitle = speech.title
+                    imported++
+                } catch (e: Exception) {
+                    problem = e.message ?: "No se pudo leer un archivo."
+                }
+            }
+            lastId?.let { showNew(it) }
+            messages.trySend(
+                UiMessage(
+                    when {
+                        imported == 0 -> problem ?: "No se pudo importar el archivo."
+                        problem != null -> "Importados $imported de ${uris.size}. $problem"
+                        imported == 1 -> "Importado «$lastTitle»"
+                        else -> "$imported discursos importados"
+                    },
+                ),
+            )
+        }
+    }
+
+    /**
+     * Creates a speech from pasted or shared text. Markdown keeps its formatting, and a `# ` title on
+     * the first line names the speech.
+     */
+    fun importText(text: String, subject: String? = null, message: String = "Discurso creado con el texto copiado") {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            val doc = Markup.parse(text)
+            val title = doc.leadingTitle() ?: subject?.trim()?.takeIf { it.isNotEmpty() } ?: doc.firstLine()
+            val id = repo.create(title, doc, folderId = (filter.value as? LibraryFilter.Folder)?.id)
+            showNew(id)
+            messages.trySend(UiMessage(message))
+        }
+    }
+
+    /**
+     * Copies the prompt for an AI assistant: the user's own template note when it exists (they may
+     * have tuned it), or the built-in one.
+     */
+    fun copyTemplate() {
+        viewModelScope.launch {
+            val note = templateNoteId()?.let { repo.load(it) }
+            val text = note?.doc?.toMarkdown(note.title) ?: SampleContent.AGENT_TEMPLATE
+            Clipboard.copy(getApplication<Application>(), "Plantilla para tu IA", text)
+            messages.trySend(UiMessage("Plantilla copiada. Pégala en tu agente de IA.", "Ver nota") { openTemplate() })
+        }
+    }
+
+    /** Opens the template note, creating it again if it was deleted. */
+    fun openTemplate() {
+        viewModelScope.launch {
+            val id = templateNoteId() ?: repo.create(SampleContent.AGENT_TEMPLATE_TITLE, SampleContent.agentTemplate)
+            showNew(id)
+        }
+    }
+
+    private suspend fun templateNoteId(): Long? =
+        repo.observeActive().first().firstOrNull { it.title == SampleContent.AGENT_TEMPLATE_TITLE }?.id
+
+    /** Makes sure [id] is listed (not hidden by the trash, the pinned filter or a search) and opens it. */
+    private fun showNew(id: Long) {
+        if (_filter.value == LibraryFilter.Trash || _filter.value == LibraryFilter.Pinned) _filter.value = LibraryFilter.All
+        _query.value = ""
+        _selectedId.value = id
     }
 
     fun togglePin(item: SpeechListItem) {

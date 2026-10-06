@@ -48,14 +48,21 @@ class AppContainer(private val context: Context) {
         }
     }
 
-    /** On the very first launch, create the welcome note and a speech to practise Talks mode with. */
+    /**
+     * On the very first launch, create the welcome note, a speech to practise Talks mode with and
+     * the template for an AI assistant. Installs from before the template existed get it once.
+     */
     private suspend fun seedIfFirstRun() {
-        if (settings.settings.first().seeded) return
-        if (speeches.count() == 0) {
+        val s = settings.settings.first()
+        if (s.seeded && s.templateSeeded) return
+        if (!s.seeded && speeches.count() == 0) {
             speeches.create(SampleContent.PRACTICE_TITLE, SampleContent.practice)
+            speeches.create(SampleContent.AGENT_TEMPLATE_TITLE, SampleContent.agentTemplate)
             speeches.create(SampleContent.WELCOME_TITLE, SampleContent.welcome)
+        } else if (!s.templateSeeded) {
+            speeches.create(SampleContent.AGENT_TEMPLATE_TITLE, SampleContent.agentTemplate)
         }
-        settings.update { it.copy(seeded = true) }
+        settings.update { it.copy(seeded = true, templateSeeded = true) }
     }
 }
 

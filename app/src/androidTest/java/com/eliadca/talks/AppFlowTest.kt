@@ -111,7 +111,7 @@ class AppFlowTest {
             // Wait for the first-launch sample content, then start from an empty library.
             withTimeout(20_000) { while (!container.settings.settings.first().seeded) delay(100) }
             container.database.clearAllTables()
-            container.settings.update { AppSettings(seeded = true, engine = EngineKind.ANDROID) }
+            container.settings.update { AppSettings(seeded = true, templateSeeded = true, engine = EngineKind.ANDROID) }
         }
         val focused = runCatching { compose.waitUntil(20_000) { compose.activity.hasWindowFocus() }; true }.getOrDefault(false)
         Log.i("TALKS_TEST", "start of test: window focus=$focused")
@@ -299,6 +299,65 @@ class AppFlowTest {
         compose.onNodeWithContentDescription("Cerrar el menú").assertIsNotDisplayed()
         compose.onNodeWithContentDescription("Volver a la lista").performClick()
         waitForText("Charla vertical")
+    }
+
+    private fun clipboard(): android.content.ClipboardManager =
+        context.getSystemService(android.content.ClipboardManager::class.java)
+
+    private fun clipboardText(): String {
+        var text = ""
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            text = clipboard().primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        }
+        return text
+    }
+
+    @Test
+    fun markdownFromAnAssistantComesInFormattedAndGoesBackOutAsMarkdown() {
+        assertTrue("the tablet must be in landscape", forceLandscape())
+        waitForText("Todos")
+        val answer = "```markdown\n# Discurso de la IA\n[Respirar.]\n## Apertura\nBuenos días a **todos**.\n- uno\n- dos\n```"
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            clipboard().setPrimaryClip(android.content.ClipData.newPlainText("respuesta", answer))
+        }
+
+        // Importar → Pegar desde el portapapeles.
+        compose.onNodeWithContentDescription("Importar (archivos, portapapeles)").performClick()
+        waitForText("Pegar desde el portapapeles")
+        Shots.take("import-menu")
+        clickVisible("Pegar desde el portapapeles")
+        waitForText("Discurso de la IA")
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+        val saved = eventually(10_000) {
+            runBlocking(Dispatchers.IO) {
+                container.speeches.observeActive().first().firstOrNull { it.title == "Discurso de la IA" }?.let { container.speeches.load(it.id) }
+            }
+        }
+        Log.i("TALKS_TEST", "imported text='${saved.doc.text}' spans=${saved.doc.spans}")
+        for (type in listOf(SpanType.H1, SpanType.H2, SpanType.BOLD, SpanType.BULLET)) {
+            assertTrue("imported speech has no $type: ${saved.doc.spans}", saved.doc.spans.any { it.type == type })
+        }
+        assertTrue(!saved.doc.text.contains("**") && !saved.doc.text.contains("```"))
+        Shots.take("imported-markdown")
+
+        // ⋮ → Copiar como Markdown gives the same Markdown back (without the code fence).
+        compose.onNodeWithContentDescription("Más opciones").performClick()
+        clickVisible("Copiar como Markdown")
+        val copied = eventually { clipboardText().takeIf { it.startsWith("# Discurso de la IA") } }
+        Log.i("TALKS_TEST", "copied as markdown='${copied.replace("\n", "\\n")}'")
+        assertTrue(copied, copied.contains("Buenos días a **todos**.") && copied.contains("- uno\n- dos") && copied.contains("## Apertura"))
+
+        // Importar → Copiar plantilla para tu IA, then open the note from the message.
+        compose.onNodeWithContentDescription("Importar (archivos, portapapeles)").performClick()
+        waitForText("Copiar plantilla para tu IA")
+        clickVisible("Copiar plantilla para tu IA")
+        eventually { clipboardText().takeIf { it == SampleContent.AGENT_TEMPLATE } }
+        // Earlier messages are shown first, one after another.
+        waitForText("Ver nota", 30_000)
+        clickVisible("Ver nota")
+        waitForText(SampleContent.AGENT_TEMPLATE_TITLE)
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+        Shots.take("agent-template")
     }
 
     @Test

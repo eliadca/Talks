@@ -8,6 +8,8 @@ import com.eliadca.talks.core.doc.Markup
 import com.eliadca.talks.core.doc.RichDoc
 import com.eliadca.talks.core.doc.RichSpan
 import com.eliadca.talks.core.doc.SpanType
+import com.eliadca.talks.core.doc.firstLine
+import com.eliadca.talks.core.doc.leadingTitle
 import com.eliadca.talks.core.doc.normalized
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,7 +19,11 @@ import java.util.zip.ZipInputStream
 
 class ImportedSpeech(val title: String, val doc: RichDoc)
 
-/** Reads speeches from plain text, Markdown and Word (.docx) files. */
+/**
+ * Reads speeches from Markdown, plain text and Word (.docx) files. Text files are read as Markdown
+ * (see [Markup]), so what an AI assistant writes keeps its headings, emphasis, lists and notes; a
+ * file that starts with a `# ` title takes its name from it.
+ */
 class Importer(private val resolver: ContentResolver) {
 
     suspend fun read(uri: Uri): ImportedSpeech = withContext(Dispatchers.IO) {
@@ -25,13 +31,25 @@ class Importer(private val resolver: ContentResolver) {
         val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
             ?: throw IllegalStateException("No se pudo abrir el archivo.")
         val lower = name.lowercase()
-        val title = name.substringBeforeLast('.').replace('_', ' ').trim()
-        val doc = when {
-            lower.endsWith(".docx") || bytes.size > 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() -> DocxReader.read(bytes)
-            lower.endsWith(".md") || lower.endsWith(".markdown") -> Markup.parse(decode(bytes))
-            else -> RichDoc(decode(bytes).replace("\r\n", "\n").replace('\r', '\n'))
-        }
+        val fileTitle = name.substringBeforeLast('.').replace('_', ' ').trim()
+        val word = lower.endsWith(".docx") || bytes.size > 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()
+        val doc = if (word) DocxReader.read(bytes) else Markup.parse(decodeText(bytes, name))
+        val title = (if (word) null else doc.leadingTitle()) ?: fileTitle.ifBlank { doc.firstLine() }
         ImportedSpeech(title.ifBlank { "Discurso importado" }, doc)
+    }
+
+    private fun decodeText(bytes: ByteArray, name: String): String {
+        if (bytes.size >= 2 && (bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() || bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte())) {
+            return String(bytes, Charsets.UTF_16) // "Unicode" text from Windows Notepad
+        }
+        val head = bytes.copyOfRange(0, minOf(bytes.size, 4096))
+        if (head.size >= 4 && String(head, 0, 4, Charsets.ISO_8859_1) == "%PDF") {
+            throw IllegalStateException("«$name» es un PDF y no se puede importar. Usa Markdown (.md), texto (.txt) o Word (.docx).")
+        }
+        if (head.any { it == 0.toByte() }) {
+            throw IllegalStateException("«$name» no es un archivo de texto, Markdown ni Word.")
+        }
+        return decode(bytes)
     }
 
     private fun decode(bytes: ByteArray): String {
@@ -40,7 +58,7 @@ class Importer(private val resolver: ContentResolver) {
             bytes.copyOfRange(3, bytes.size)
         } else bytes
         val utf8 = body.toString(Charsets.UTF_8)
-        return if (utf8.contains('�')) body.toString(Charsets.ISO_8859_1) else utf8
+        return if (utf8.contains('\uFFFD')) body.toString(Charsets.ISO_8859_1) else utf8
     }
 
     private fun displayName(uri: Uri): String {

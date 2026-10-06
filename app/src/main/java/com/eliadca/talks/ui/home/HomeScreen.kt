@@ -1,6 +1,8 @@
 package com.eliadca.talks.ui.home
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
@@ -44,10 +46,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.eliadca.talks.core.doc.RichDoc
+import com.eliadca.talks.core.doc.toMarkdown
 import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.data.db.SpeechListItem
+import com.eliadca.talks.export.Clipboard
 import com.eliadca.talks.ui.components.EmptyState
 import com.eliadca.talks.ui.editor.EditorPane
 import com.eliadca.talks.ui.editor.EditorViewModel
@@ -66,8 +72,9 @@ fun HomeScreen(
     dark: Boolean,
     onStartTalks: (Long) -> Unit,
     onOpenSettings: () -> Unit,
-    onExportPdf: (Long) -> Unit,
-    onShareText: (Long) -> Unit,
+    onExportPdf: (String, RichDoc) -> Unit,
+    onShareText: (String, RichDoc) -> Unit,
+    onShareMarkdown: (String, String) -> Unit,
 ) {
     val filter by home.filter.collectAsState()
     val query by home.query.collectAsState()
@@ -97,6 +104,31 @@ fun HomeScreen(
     val pace = if (home.paceWpm > 0) home.paceWpm else settings.wordsPerMinute
     val openMenu: () -> Unit = { scope.launch { drawerState.open() } }
     val closeMenu: () -> Unit = { scope.launch { drawerState.close() } }
+
+    val context = LocalContext.current
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        home.importFiles(uris)
+    }
+    val importActions = ImportActions(
+        files = { importLauncher.launch(IMPORT_TYPES) },
+        paste = {
+            val text = Clipboard.readText(context)
+            if (text.isNullOrBlank()) home.toast("No hay texto en el portapapeles. Copia el discurso y vuelve a intentarlo.")
+            else home.importText(text)
+        },
+        copyTemplate = home::copyTemplate,
+    )
+    val drawerImportActions = ImportActions(
+        files = { closeMenu(); importActions.files() },
+        paste = { closeMenu(); importActions.paste() },
+        copyTemplate = { closeMenu(); importActions.copyTemplate() },
+    )
+
+    /** The open speech as it is on screen right now (the stored copy may lag a moment behind). */
+    fun openSpeech(): Pair<String, RichDoc>? {
+        val doc = editor.controller.snapshot() ?: editor.current?.doc ?: return null
+        return editor.title to doc
+    }
 
     BoxWithConstraints(
         Modifier
@@ -130,6 +162,7 @@ fun HomeScreen(
                 onRestore = home::restore,
                 onDeleteForever = { confirmDelete = it },
                 onEmptyTrash = { confirmDelete = EMPTY_TRASH_MARKER },
+                importActions = importActions,
                 modifier = mod,
             )
         }
@@ -140,8 +173,15 @@ fun HomeScreen(
             moveToFolder = { f -> selectedId?.let { home.moveToFolder(it, f) } },
             setLabel = { c -> selectedId?.let { home.setLabel(it, c) } },
             setTargetMinutes = { m -> selectedId?.let { home.setTarget(it, m) } },
-            exportPdf = { selectedId?.let(onExportPdf) },
-            shareText = { selectedId?.let(onShareText) },
+            exportPdf = { openSpeech()?.let { (title, doc) -> onExportPdf(title, doc) } },
+            shareText = { openSpeech()?.let { (title, doc) -> onShareText(title, doc) } },
+            copyMarkdown = {
+                openSpeech()?.let { (title, doc) ->
+                    Clipboard.copy(context, title.ifBlank { "Discurso" }, doc.toMarkdown(title))
+                    home.toast("Copiado como Markdown")
+                }
+            },
+            shareMarkdown = { openSpeech()?.let { (title, doc) -> onShareMarkdown(title, doc.toMarkdown(title)) } },
             saveVersion = { label -> selectedId?.let { home.saveVersion(it, label) } },
             restoreVersion = { v -> selectedId?.let { id -> home.restoreVersion(id, v) { editor.reload() } } },
             deleteVersion = home::deleteVersion,
@@ -205,6 +245,7 @@ fun HomeScreen(
                             onOpenSettings()
                         },
                         onClose = closeMenu,
+                        importActions = drawerImportActions,
                     )
                 }
             },
@@ -277,6 +318,13 @@ private val RAIL_WIDTH: Dp = 88.dp
 
 /** The editor next to the list must be at least this wide; otherwise they take turns. */
 private val MIN_EDITOR_WIDTH: Dp = 520.dp
+
+/** What the file picker offers; anything is allowed, since many apps label .md files vaguely. */
+private val IMPORT_TYPES = arrayOf(
+    "text/markdown", "text/x-markdown", "text/plain",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/octet-stream", "*/*",
+)
 
 /** Stands in for "all trashed speeches" in the delete confirmation. */
 private val EMPTY_TRASH_MARKER = SpeechListItem(-1, "", "", 0, null, false, 0, 0, 0, 0, null, null)

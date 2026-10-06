@@ -63,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import com.eliadca.talks.data.db.FolderEntity
 import com.eliadca.talks.ui.components.ColorSwatch
 import com.eliadca.talks.ui.theme.LabelColors
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.filled.FileDownload
 
 /**
  * The menu folded into a slim rail: new speech, the main lists, folders (which open the full
@@ -163,8 +165,10 @@ fun SidebarContent(
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
+    importActions: ImportActions? = null,
 ) {
     var folderDialog by remember { mutableStateOf<FolderEntity?>(null) }
+    var importMenu by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<FolderEntity?>(null) }
 
@@ -187,6 +191,17 @@ fun SidebarContent(
             Icon(Icons.Filled.NoteAdd, null, Modifier.size(20.dp))
             Spacer(Modifier.size(8.dp))
             Text("Nuevo discurso")
+        }
+        if (importActions != null) {
+            Spacer(Modifier.height(8.dp))
+            Box {
+                OutlinedButton(onClick = { importMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.FileDownload, null, Modifier.size(20.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("Importar")
+                }
+                ImportMenu(importMenu, { importMenu = false }, importActions)
+            }
         }
         Spacer(Modifier.height(14.dp))
 
