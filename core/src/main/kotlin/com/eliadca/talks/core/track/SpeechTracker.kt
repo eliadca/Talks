@@ -64,6 +64,16 @@ data class TrackerConfig(
     val bridgeBits: Double = 9.5,
     /** Pure hesitations ("eh", "mmm") say nothing about the place and are left out. */
     val dropHesitations: Boolean = true,
+    /**
+     * Going back needs a long run of the script there, still growing over several updates: a phrase
+     * said again ("Isaías 42:9", a refrain, the last words repeated) must never pull the text back.
+     */
+    val backBits: Double = 45.0,
+    val backMatches: Int = 7,
+    val backConfirmations: Int = 3,
+    /** Matched words needed for a skip ahead, and for a jump far ahead. */
+    val skipMatches: Int = 3,
+    val farMatches: Int = 4,
 )
 
 enum class TrackStatus {
@@ -205,6 +215,13 @@ class SpeechTracker(
     private var status = TrackStatus.WAITING
     private var pendingPos = -1
     private var pendingCount = 0
+
+    /** Evidence for the pending big move at its last confirmation: only more of it confirms again. */
+    private var pendingBits = 0.0
+
+    /** Where the marker was before its latest big move, while going on from there can still undo it. */
+    private var returnPos = -1
+    private var returnUntil = 0
     private var backCount = 0
 
     /** Heard words of finished recogniser sessions, counted since the start: heard words get absolute numbers. */
@@ -250,6 +267,7 @@ class SpeechTracker(
         confidence = 1f
         status = TrackStatus.WAITING
         pendingPos = -1; pendingCount = 0; backCount = 0
+        returnPos = -1
         history.clear()
         unsupportedWords = 0; offScript = false
         committedWords = 0
@@ -270,6 +288,7 @@ class SpeechTracker(
         confidence = 1f
         status = if (hasSpoken) TrackStatus.FOLLOWING else TrackStatus.WAITING
         pendingPos = -1; pendingCount = 0; backCount = 0
+        returnPos = -1
         // Words heard before the move belong to the old place.
         history.clear()
         unsupportedWords = 0; offScript = false
@@ -701,7 +720,20 @@ class SpeechTracker(
         // Ordinary progress: about as many words as were just heard.
         val stepLimit = newWords + 2
         var moved = false
-        when {
+        // Just after a big move, a speaker who goes on from where the marker was had only repeated
+        // something written elsewhere (a quote, a reference): back to the old place at once.
+        if (returnPos >= 0 && heardNow() > returnUntil) returnPos = -1
+        if (returnPos >= 0 && best > returnPos && best <= returnPos + UNDO_WORDS &&
+            (if (returnPos < displayPos) best < displayPos - 2 else true)
+        ) {
+            val to = landing(best, returnPos + 1, recent, prefixLast, config.reentryBits, 3, 1, from = returnPos)
+            if (to > returnPos) {
+                returnPos = -1
+                accept(to)
+                moved = true
+            }
+        }
+        if (!moved) when {
             delta == 0 -> { pendingPos = -1; pendingCount = 0; backCount = 0 }
             delta in 1..stepLimit -> {
                 // Coming back from an improvisation needs a real phrase of the script; while
@@ -725,24 +757,37 @@ class SpeechTracker(
                 }
             }
             else -> {
-                // A skip ahead or a jump: the model must be sure and the words must clearly read as
-                // the script at the new place; unless the evidence is overwhelming, it must also
-                // hold for a second update.
-                val far = delta < 0 || delta > FAR_WORDS
-                val needBits = if (far) config.jumpBits else config.moveBits
-                val needMatches = if (far) 4 else 3
-                if (confidence >= config.jumpConfidence && atBest.atLeast(needBits, needMatches, 1)) {
-                    val sure = atBest.atLeast(needBits + SURE_EXTRA_BITS, needMatches + 1, 1)
-                    if (!sure) {
-                        if (pendingPos >= 0 && abs(pendingPos - best) <= 6) pendingCount++ else {
-                            pendingPos = best; pendingCount = 1
-                        }
+                // A skip ahead or a jump. A phrase said again (a scripture reference, a refrain) also
+                // reads as the script where it was written, so the model must be sure, the words must
+                // read as a long stretch of the script at the new place, and that stretch must keep
+                // growing over the next updates: a speaker who repeats something and goes on where
+                // they were is never taken away from their place. Going back needs the most.
+                val back = delta < 0
+                val far = back || delta > FAR_WORDS
+                val needBits = if (back) config.backBits else if (far) config.jumpBits else config.moveBits
+                val needMatches = if (back) config.backMatches else if (far) config.farMatches else config.skipMatches
+                val needContent = if (back) 2 else 1
+                val confirmations = if (back) config.backConfirmations else config.jumpConfirmations
+                if (confidence >= config.jumpConfidence && atBest.atLeast(needBits, needMatches, needContent)) {
+                    // Overwhelming evidence shows a skip ahead at once; going back always waits.
+                    val sure = !back && atBest.atLeast(needBits + SURE_EXTRA_BITS, needMatches + SURE_EXTRA_MATCHES, 1)
+                    if (pendingPos < 0 || abs(pendingPos - best) > 6) {
+                        pendingCount = 1
+                        pendingBits = atBest.bits
+                    } else if (atBest.bits > pendingBits + GROWTH_BITS) {
+                        // Only more of the script there confirms the move, not the same words again.
+                        pendingCount++
+                        pendingBits = atBest.bits
                     }
-                    if (sure || pendingCount >= config.jumpConfirmations) {
+                    pendingPos = best
+                    if (sure || pendingCount >= confirmations) {
                         // Land right after the words heard there, never on a word not said yet.
-                        val to = landing(best, maxOf(0, best - 2), recent, prefixLast, needBits, needMatches, 1)
+                        val to = landing(best, maxOf(0, best - 2), recent, prefixLast, needBits, needMatches, needContent)
                         if (to >= 0 && to != displayPos) {
+                            val from = displayPos
                             accept(to)
+                            returnPos = from
+                            returnUntil = heardNow() + UNDO_WORDS
                             moved = true
                         }
                     }
@@ -782,12 +827,13 @@ class SpeechTracker(
         bits: Double,
         matches: Int,
         content: Int,
+        from: Int = displayPos,
     ): Int {
         landingHeard = -1
         if (!config.exactLanding) return if (support(recent, prefixLast, high).atLeast(bits, matches, content)) high else -1
         var q = high
         while (q >= low && q >= 0) {
-            val sup = support(recent, prefixLast, q, from = displayPos, exactEnd = true)
+            val sup = support(recent, prefixLast, q, from = from, exactEnd = true)
             if (sup.atLeast(bits, matches, content)) {
                 landingHeard = sup.lastHeard
                 return q
@@ -796,6 +842,9 @@ class SpeechTracker(
         }
         return -1
     }
+
+    /** Absolute number of words heard so far, across recogniser sessions. */
+    private fun heardNow(): Int = if (recentAbs.isEmpty()) committedWords else recentAbs.last() + 1
 
     private fun accept(pos: Int) {
         // The words that read up to here are spent: they cannot take the marker further later.
@@ -830,8 +879,15 @@ class SpeechTracker(
         /** A chain must end within this many words of the end on both sides. */
         const val MAX_TAIL = 2
 
-        /** Extra evidence that makes a big move certain enough to show at once, without confirmation. */
+        /** Extra evidence that makes a skip ahead certain enough to show at once, without confirmation. */
         const val SURE_EXTRA_BITS = 14.0
+        const val SURE_EXTRA_MATCHES = 1
+
+        /** For this many heard words after a big move, going on from the old place undoes it. */
+        const val UNDO_WORDS = 16
+
+        /** How much the evidence for a pending big move must grow for an update to confirm it. */
+        const val GROWTH_BITS = 1.0
 
         /** Forward moves farther than this are treated like jumps. */
         const val FAR_WORDS = 60

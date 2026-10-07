@@ -84,18 +84,80 @@ class SpeechTrackerTest {
     @Test fun jumpsAheadWhenTheSpeakerSkips() {
         val t = SpeechTracker(index)
         t.onHypothesis("buenos dias a todos", true)
-        t.onHypothesis("quiero comenzar con una pregunta sencilla", true)
-        val expected = indexOf("sencilla") + 1
+        val skipped = "quiero comenzar con una pregunta sencilla cuantas decisiones".split(" ")
+        for (k in 1..skipped.size) t.onHypothesis(skipped.take(k).joinToString(" "), isFinal = k == skipped.size)
+        val expected = indexOf("decisiones") + 1
         assertTrue("pos=${t.state.position} expected≈$expected", kotlin.math.abs(t.state.position - expected) <= 2)
     }
 
-    @Test fun jumpsBackWhenTheSpeakerRepeats() {
-        val t = SpeechTracker(index)
-        t.onHypothesis("buenos dias a todos gracias por estar aqui y gracias por regalarme lo mas valioso que tienen su tiempo", true)
-        t.onHypothesis("gracias por estar aqui y gracias por regalarme", false)
-        t.onHypothesis("gracias por estar aqui y gracias por regalarme lo mas valioso", true)
-        val expected = indexOf("valioso") + 1
-        assertTrue("pos=${t.state.position} expected≈$expected", kotlin.math.abs(t.state.position - expected) <= 3)
+    /** The speaker reads [words] from..until as a recogniser hears them: growing partials, a final every few words. */
+    private fun read(t: SpeechTracker, words: List<String>, from: Int, until: Int, check: (Int) -> Unit = {}) {
+        var k = from
+        while (k < until) {
+            val end = minOf(until, k + 8)
+            for (m in k + 1..end) check(t.onHypothesis(words.subList(k, m).joinToString(" "), isFinal = m == end).position)
+            k = end
+        }
+    }
+
+    private fun say(t: SpeechTracker, phrase: String, check: (Int) -> Unit) {
+        val heard = phrase.split(" ")
+        for (k in 1..heard.size) check(t.onHypothesis(heard.take(k).joinToString(" "), isFinal = k == heard.size).position)
+    }
+
+    private val withReference by lazy {
+        ScriptIndex.build(
+            "Leamos Isaías 42:9, que dice: las cosas primeras ya han venido, y yo anuncio cosas nuevas. " +
+                SampleScripts.practice.tokens.take(160).joinToString(" ") { it.norm } +
+                ". Por eso, como dice Isaías 42:9, las cosas primeras ya han venido. " +
+                SampleScripts.practice.tokens.drop(160).take(80).joinToString(" ") { it.norm },
+        )
+    }
+
+    @Test fun aPhraseSaidAgainNeverPullsTheMarkerBack() {
+        val ix = withReference
+        val words = ix.tokens.map { it.norm }
+        for (phrase in listOf("Isaías 42:9", "como dice Isaías 42:9", "las cosas primeras ya han venido", "y yo anuncio cosas nuevas")) {
+            val t = SpeechTracker(ix)
+            val here = 110
+            read(t, words, 0, here)
+            assertTrue("read up to $here: ${t.state.position}", kotlin.math.abs(t.state.position - here) <= 2)
+            say(t, phrase) { assertTrue("«$phrase» pulled the marker back to $it", it >= here - 2) }
+            // ...and the speaker goes on where they were.
+            read(t, words, here, here + 12) { assertTrue("«$phrase», then reading: back to $it", it >= here - 2) }
+            assertTrue("«$phrase»: lost at ${t.state.position}", kotlin.math.abs(t.state.position - (here + 12)) <= 3)
+        }
+    }
+
+    @Test fun aPhraseSaidBeforeItsTimeDoesNotPushTheMarkerAhead() {
+        val ix = withReference
+        val words = ix.tokens.map { it.norm }
+        val later = words.withIndex().filter { it.value == "isaias" }[1].index
+        assertTrue("second reference at $later", later in 150..200)
+        val t = SpeechTracker(ix)
+        val here = later - 30
+        read(t, words, 0, here)
+        // The quote may show where it is written ahead while it is being said...
+        val seen = ArrayList<Int>()
+        say(t, "como dice Isaías 42:9 las cosas primeras ya han venido") { seen += it }
+        // ...but as soon as the speaker goes on where they were, the marker is back there.
+        var k = 0
+        read(t, words, here, here + 12) {
+            k++
+            seen += it
+            if (k >= 4) assertTrue("still ahead at $it after $k words (here=$here, later=$later): $seen", it <= here + k + 2)
+        }
+        assertTrue("lost at ${t.state.position}", kotlin.math.abs(t.state.position - (here + 12)) <= 3)
+    }
+
+    @Test fun reallyGoingBackToReadAPassageAgainIsFollowed() {
+        val ix = withReference
+        val words = ix.tokens.map { it.norm }
+        val t = SpeechTracker(ix)
+        read(t, words, 0, 120)
+        // The speaker lost the thread and reads two sentences again from word 40.
+        read(t, words, 40, 70)
+        assertTrue("did not follow back: ${t.state.position}", kotlin.math.abs(t.state.position - 70) <= 3)
     }
 
     @Test fun manualPositionIsHonouredAndOldSessionWordsAreIgnored() {

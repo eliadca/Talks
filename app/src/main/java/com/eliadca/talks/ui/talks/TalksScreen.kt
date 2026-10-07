@@ -12,6 +12,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.material.icons.filled.VerticalAlignCenter
 import androidx.compose.material.icons.filled.Speed
@@ -26,6 +27,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -448,6 +450,33 @@ private fun nextTheme(t: ReaderTheme): ReaderTheme = when (t) {
 private const val CONTROLS_HIDE_MS = 5_000L
 
 /**
+ * The status (with the time) at the top left and the controls at the top right; when they do not fit
+ * side by side (a narrower screen, a bigger font) the controls go just below the status.
+ */
+@Composable
+private fun StatusAndControls(modifier: Modifier, content: @Composable () -> Unit) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val status = measurables[0].measure(loose)
+        val controls = measurables.getOrNull(1)?.measure(loose)
+        val gap = 12.dp.roundToPx()
+        val beside = controls == null || status.width + gap + controls.width <= constraints.maxWidth
+        val height = when {
+            controls == null -> status.height
+            beside -> maxOf(status.height, controls.height)
+            else -> status.height + gap / 2 + controls.height
+        }
+        layout(constraints.maxWidth, height) {
+            status.place(0, 0)
+            controls?.place(constraints.maxWidth - controls.width, if (beside) 0 else status.height + gap / 2)
+        }
+    }
+}
+
+/** Width that fits the status (time) and the whole controls bar side by side. */
+private val CONTROLS_BESIDE_STATUS = 1220.dp
+
+/**
  * Presenter remotes send page/arrow/media keys; the volume keys can be used when enabled. In
  * manual mode next/previous scroll the text. The "black screen" key of most remotes (B or .)
  * switches manual mode on and off.
@@ -546,23 +575,21 @@ private fun LiveOverlay(
     val st by session.state.collectAsState()
     val ink = Color(palette.text)
 
-    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
-        // Status: always visible, so the speaker can trust at a glance that the app is listening.
-        StatusPill(st, targetMinutes, totalSeconds, palette, Modifier.align(Alignment.TopStart).padding(12.dp))
-
-        AnimatedVisibility(
-            visible = controlsVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
-        ) {
-            ControlsBar(st, palette, locked, markingOpen, actions)
+    BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
+        // Status: always visible, so the speaker can trust at a glance that the app is listening. The
+        // controls sit beside it when both fit, otherwise just below it: the time is never covered.
+        val besideStatus = maxWidth >= CONTROLS_BESIDE_STATUS
+        StatusAndControls(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(10.dp)) {
+            StatusPill(st, targetMinutes, totalSeconds, palette, Modifier.padding(2.dp))
+            AnimatedVisibility(visible = controlsVisible, enter = fadeIn(), exit = fadeOut()) {
+                ControlsBar(st, palette, locked, markingOpen, actions)
+            }
         }
 
         // Problems with the recogniser.
         st.error?.takeIf { !st.manual }?.let { err ->
             Surface(
-                Modifier.align(Alignment.TopCenter).padding(top = 104.dp, start = 16.dp, end = 16.dp).widthIn(max = 680.dp),
+                Modifier.align(Alignment.TopCenter).padding(top = if (besideStatus) 104.dp else 160.dp, start = 16.dp, end = 16.dp).widthIn(max = 680.dp),
                 shape = RoundedCornerShape(20.dp),
                 color = if (err.fatal) Color(0xFFB3261E) else Color(0xFF8A5A00),
                 shadowElevation = 8.dp,

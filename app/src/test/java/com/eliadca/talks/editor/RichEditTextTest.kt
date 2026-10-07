@@ -393,6 +393,35 @@ class RichEditTextTest {
         assertTrue(doc().spans.isEmpty())
     }
 
+    @Test fun markdownTypedByHandBecomesFormatting() {
+        type("Hola **mundo** y *todos* ==hoy==")
+        val d = doc()
+        assertEquals("Hola mundo y todos hoy", d.text)
+        fun styled(type: String) = d.spans.filter { it.type == type }.map { d.text.substring(it.start, it.end) }
+        assertEquals(listOf("mundo"), styled(SpanType.BOLD))
+        assertEquals(listOf("todos"), styled(SpanType.ITALIC))
+        assertEquals(listOf("hoy"), styled(SpanType.HIGHLIGHT))
+        // What follows is plain again.
+        type(" fin")
+        assertEquals(listOf("mundo"), doc().let { e -> e.spans.filter { it.type == SpanType.BOLD }.map { e.text.substring(it.start, it.end) } })
+    }
+
+    @Test fun markdownAtTheStartOfALineMakesHeadingsAndLists() {
+        type("# Título")
+        assertEquals("Título", doc().text)
+        assertEquals(BlockType.H1, doc().paragraphs().first().block)
+        edit.loadDocument(RichDoc.EMPTY)
+        type("- uno")
+        assertEquals("uno", doc().text)
+        assertEquals(BlockType.BULLET, doc().paragraphs().first().block)
+    }
+
+    @Test fun markdownSavedAsPlainTextShowsFormattedWhenOpened() {
+        edit.loadDocument(RichDoc("Hola **mundo** y *todos*"))
+        assertEquals("Hola mundo y todos", doc().text)
+        assertTrue(doc().spans.any { it.type == SpanType.BOLD })
+    }
+
     @Test fun pastingAsPlainTextKeepsTheMarkdownSigns() {
         putOnClipboard("**literal**")
         edit.onTextContextMenuItem(android.R.id.pasteAsPlainText)

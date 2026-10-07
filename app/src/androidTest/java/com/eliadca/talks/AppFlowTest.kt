@@ -435,10 +435,13 @@ class AppFlowTest {
             onView(isAssignableFrom(ReaderView::class.java)).perform(click()) // a tap shows the controls
         }
         clickVisible("Marcado")
-        waitForText("Al ritmo de tu voz")
+        waitForText("2 palabras por delante") // the default: whole sentences, two words ahead
+        clickVisible("Frase")
+        clickVisible("Atrasar")
+        waitForText("1 palabra por delante")
         clickVisible("Oración")
         clickVisible("Adelantar")
-        waitForText("1 palabra por delante")
+        waitForText("2 palabras por delante")
         Thread.sleep(500)
         Shots.take("talks-marking")
         clickVisible("Listo")

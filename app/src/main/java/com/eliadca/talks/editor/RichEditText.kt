@@ -2,6 +2,8 @@ package com.eliadca.talks.editor
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
 import android.text.Editable
@@ -71,6 +73,9 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     private var changeEnd = 0
     private var newlineAt = -1
 
+    /** The change was typing (a character or two, maybe completing a word), not a paste. */
+    private var typedChange = false
+
     // --- find --------------------------------------------------------------------------------
 
     private var findQuery = ""
@@ -87,13 +92,23 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     private var downY = 0f
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
+    // --- the scroll bar ----------------------------------------------------------------------
+
+    private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val barRect = RectF()
+    private var draggingBar = false
+
+    /** Where on the thumb the finger took hold of it. */
+    private var barGrab = 0f
+
     init {
         background = null
         gravity = Gravity.TOP or Gravity.START
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
         imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
-        isVerticalScrollBarEnabled = true
+        // A scroll bar of our own, always there and big enough to drag (see drawScrollBar).
+        isVerticalScrollBarEnabled = false
         overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
         setHorizontallyScrolling(false)
         setLineSpacing(0f, 1.3f)
@@ -111,8 +126,11 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     /** Replaces the content with [doc] and clears the undo history. */
     fun loadDocument(doc: RichDoc) {
         quiet = true
+        var converted = 0
         internal {
             setText(SpannableCodec.toSpannable(doc, style))
+            // Markdown typed earlier as plain text (**…**) shows as the formatting it stands for.
+            converted = convertInlineMarkdown(text, 0, text.length)
             renumber()
         }
         undoStack.clear()
@@ -125,6 +143,8 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
         notifyHistory()
         notifyFormat()
         if (findQuery.isNotEmpty()) recomputeFind(keepIndex = false)
+        // Saved converted, so Talks mode shows the formatting too.
+        if (converted > 0) notifyChanged()
     }
 
     /** The current content as a storable document. */
@@ -168,6 +188,70 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
             canvas.restore()
         }
         super.onDraw(canvas)
+        drawScrollBar(canvas)
+    }
+
+    // --- the scroll bar ------------------------------------------------------------------------
+
+    private fun maxScrollY(): Int {
+        val l = layout ?: return 0
+        return max(0, l.height + totalPaddingTop + totalPaddingBottom - height)
+    }
+
+    /** The thumb of the scroll bar on screen (not scrolled); false when the whole speech fits. */
+    private fun thumbBounds(out: RectF): Boolean {
+        val maxScroll = maxScrollY()
+        if (maxScroll <= 0 || height <= 0) return false
+        val inset = style.dp(4f)
+        val track = height - 2 * inset
+        val thumb = max(style.dp(56f), track * height / (height + maxScroll).toFloat()).coerceAtMost(track)
+        val top = inset + (track - thumb) * (scrollY.coerceIn(0, maxScroll).toFloat() / maxScroll)
+        val w = style.dp(if (draggingBar) 10f else 6f)
+        out.set(width - inset - w, top, width - inset, top + thumb)
+        return true
+    }
+
+    /** A thin bar at the right edge that shows where in the speech the page is; it can be dragged. */
+    private fun drawScrollBar(canvas: Canvas) {
+        if (!thumbBounds(barRect)) return
+        barRect.offset(scrollX.toFloat(), scrollY.toFloat())
+        barPaint.color = (style.muted and 0x00FFFFFF) or ((if (draggingBar) 0xD0 else 0x80) shl 24)
+        val r = barRect.width() / 2
+        canvas.drawRoundRect(barRect, r, r, barPaint)
+    }
+
+    private fun dragBarTo(y: Float) {
+        val maxScroll = maxScrollY()
+        if (maxScroll <= 0) return
+        val inset = style.dp(4f)
+        val track = height - 2 * inset
+        val thumb = max(style.dp(56f), track * height / (height + maxScroll).toFloat()).coerceAtMost(track)
+        if (track - thumb <= 0f) return
+        val f = ((y - barGrab - inset) / (track - thumb)).coerceIn(0f, 1f)
+        scrollTo(0, (f * maxScroll).roundToInt())
+    }
+
+    /** Starts dragging the scroll bar when a touch lands on its strip at the right edge. */
+    private fun touchScrollBar(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            if (ev.x < width - style.dp(BAR_TOUCH_DP) || !thumbBounds(barRect)) return false
+            draggingBar = true
+            // Holding the thumb keeps it under the finger; touching the strip elsewhere jumps there.
+            barGrab = if (ev.y in barRect.top..barRect.bottom) ev.y - barRect.top else barRect.height() / 2
+            parent?.requestDisallowInterceptTouchEvent(true)
+            dragBarTo(ev.y)
+            invalidate()
+            return true
+        }
+        if (!draggingBar) return false
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_MOVE -> dragBarTo(ev.y)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                draggingBar = false
+                invalidate()
+            }
+        }
+        return true
     }
 
     /** Moves the cursor to [offset] (a document offset) and scrolls it into view. */
@@ -547,6 +631,7 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
             changeStart = start
             changeEnd = start + count
             newlineAt = if (before == 0 && count == 1 && start < s.length && s[start] == '\n') start else -1
+            typedChange = count - before in 1..2 && count <= 64
         }
 
         override fun afterTextChanged(e: Editable) {
@@ -556,6 +641,9 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
                 normalizeParagraphs(e, changeStart, changeEnd)
                 if (newlineAt >= 0) handleEnter(e, newlineAt)
                 newlineAt = -1
+                // Only what is typed: text pasted as plain text keeps its signs.
+                if (typedChange) applyTypedMarkdown(e, changeStart, changeEnd)
+                typedChange = false
                 renumber()
                 val ps = paraStart(e, min(changeStart, e.length))
                 val pe = paraEndIncl(e, min(changeEnd, e.length))
@@ -660,6 +748,85 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
                 for (j in level..MAX_INDENT) counters[j] = 0
             }
         }
+    }
+
+    // ======================================================================================
+    // Markdown typed by hand
+    // ======================================================================================
+
+    /**
+     * Markdown typed by hand becomes formatting at once: **bold**, *italic*, ~~struck~~, ==marked==
+     * and ++underlined++ in the paragraphs just edited, and #, ##, ###, -, 1., > or [ ] followed by
+     * a space at the start of a paragraph.
+     */
+    private fun applyTypedMarkdown(e: Editable, from: Int, to: Int) {
+        val a = min(from, to).coerceIn(0, e.length)
+        val b = max(from, to).coerceIn(0, e.length)
+        convertInlineMarkdown(e, paraStart(e, a), paraEndIncl(e, b))
+        applyBlockShortcut(e)
+    }
+
+    /** Turns complete Markdown markers in [ps, pe) into formatting; returns how many it turned. */
+    private fun convertInlineMarkdown(e: Editable, ps: Int, pe: Int): Int {
+        var end = min(pe, e.length)
+        if (end <= ps) return 0
+        var any = false
+        for (k in ps until end) {
+            val ch = e[k]
+            if (ch == '*' || ch == '_' || ch == '~' || ch == '=' || ch == '+') { any = true; break }
+        }
+        if (!any) return 0
+        var done = 0
+        for (rule in INLINE_MARKDOWN) {
+            var guard = 0
+            while (guard++ < MAX_MARKDOWN_PER_PASS) {
+                val m = rule.regex.find(e.subSequence(ps, end)) ?: break
+                val w = rule.marker.length
+                val s = ps + m.range.first
+                val t = ps + m.range.last + 1
+                e.delete(t - w, t)
+                e.delete(s, s + w)
+                val ct = t - 2 * w
+                clearInline(rule.kind, s, ct)
+                // What is typed after it is not part of it.
+                e.setSpan(createSpan(rule.kind, rule.arg), s, ct, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                end -= 2 * w
+                done++
+            }
+        }
+        return done
+    }
+
+    /** "# ", "- ", "1. ", "> ", "[ ] " typed at the start of a paragraph turn it into that kind of paragraph. */
+    private fun applyBlockShortcut(e: Editable) {
+        val c = selectionStart
+        if (c <= 0 || c > e.length || selectionEnd != c || e[c - 1] != ' ') return
+        val ps = paraStart(e, c)
+        if (c - ps > 6) return
+        val prefix = e.subSequence(ps, c - 1).toString()
+        val target: BlockType
+        var checked = false
+        when {
+            prefix == "#" -> target = BlockType.H1
+            prefix == "##" -> target = BlockType.H2
+            prefix == "###" -> target = BlockType.H3
+            prefix == "-" || prefix == "*" || prefix == "•" -> target = BlockType.BULLET
+            NUMBERED_PREFIX.matches(prefix) -> target = BlockType.NUMBER
+            prefix == ">" -> target = BlockType.QUOTE
+            prefix == "[]" || prefix == "[ ]" || prefix == "- [ ]" -> target = BlockType.CHECK
+            prefix == "[x]" || prefix == "[X]" || prefix == "- [x]" || prefix == "- [X]" -> { target = BlockType.CHECK; checked = true }
+            else -> return
+        }
+        val current = blockAt(ps, paraEndIncl(e, ps))
+        val from = current?.block ?: BlockType.NORMAL
+        // Only plain paragraphs (or a list item becoming a check box) take a shortcut.
+        if (from != BlockType.NORMAL && !(from == BlockType.BULLET && target == BlockType.CHECK)) return
+        e.delete(ps, c)
+        val pe = paraEndIncl(e, ps)
+        val b = blockAt(ps, pe) ?: BlockSpan(BlockType.NORMAL, Align.START, 0, false, style)
+        b.block = target
+        b.checked = checked
+        e.setSpan(b, ps, pe, BLOCK_FLAGS)
     }
 
     // ======================================================================================
@@ -980,6 +1147,7 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     // --- check boxes ----------------------------------------------------------------------------
 
     override fun onTouchEvent(ev: MotionEvent): Boolean {
+        if (touchScrollBar(ev)) return true
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = ev.x; downY = ev.y
@@ -1027,6 +1195,25 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     }
 
     private companion object {
+        /** Width of the strip at the right edge where a touch takes the scroll bar. */
+        const val BAR_TOUCH_DP = 28f
+        const val MAX_MARKDOWN_PER_PASS = 2000
+
+        /** A Markdown marker, the formatting it stands for, and how a complete pair is found. */
+        class MarkdownRule(val marker: String, val kind: InlineKind, val arg: Int, val regex: Regex)
+
+        // Longer markers first, so that ** is not read as two *.
+        val INLINE_MARKDOWN = listOf(
+            MarkdownRule("**", InlineKind.BOLD, 0, Regex("""(?<!\*)\*\*(?=[^\s*])(.+?)(?<=[^\s*])\*\*(?!\*)""")),
+            MarkdownRule("__", InlineKind.BOLD, 0, Regex("""(?<![_\p{L}\d])__(?=[^\s_])(.+?)(?<=[^\s_])__(?![_\p{L}\d])""")),
+            MarkdownRule("~~", InlineKind.STRIKE, 0, Regex("""~~(?=\S)(.+?)(?<=\S)~~""")),
+            MarkdownRule("==", InlineKind.HIGHLIGHT, Markup.HIGHLIGHT_YELLOW, Regex("""==(?=\S)(.+?)(?<=\S)==""")),
+            MarkdownRule("++", InlineKind.UNDERLINE, 0, Regex("""\+\+(?=\S)(.+?)(?<=\S)\+\+""")),
+            MarkdownRule("*", InlineKind.ITALIC, 0, Regex("""(?<![*\p{L}\d])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![*\p{L}\d])""")),
+            MarkdownRule("_", InlineKind.ITALIC, 0, Regex("""(?<![_\p{L}\d])_(?=[^\s_])([^_\n]+?)(?<=[^\s_])_(?![_\p{L}\d])""")),
+        )
+        val NUMBERED_PREFIX = Regex("""\d{1,3}[.)]""")
+
         const val TYPING_GROUP_MS = 900L
         const val MAX_INDENT = 6
         const val MAX_FIND_MATCHES = 5000

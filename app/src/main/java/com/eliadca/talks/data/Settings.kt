@@ -46,9 +46,9 @@ data class AppSettings(
     /** Longest stretch (in words) that is underlined as "what to say next" when marking word by word. */
     val highlightWords: Int = 9,
     /** How what comes next is marked: whole phrases (the calmest), sentences, word by word, or not at all. */
-    val markUnit: MarkUnit = MarkUnit.PHRASE,
+    val markUnit: MarkUnit = MarkUnit.SENTENCE,
     /** Words the marking runs ahead of the voice (negative: behind it). */
-    val markLead: Int = 0,
+    val markLead: Int = 2,
     val readHeadings: Boolean = false,
     val mirror: Boolean = false,
     val showHeard: Boolean = false,
