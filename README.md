@@ -53,7 +53,12 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 - **Menú lateral plegado** en una barra estrecha (nuevo discurso, Todos, Fijados, Carpetas, Papelera y **Ajustes**). El menú completo se abre con el botón ☰
   y **nunca se abre al deslizar**, así que moverte por un discurso no lo despliega por accidente.
 - Lista y editor lado a lado en horizontal; en vertical se turnan (lista → discurso → volver). Compatible con multiventana y DeX.
-- Carpetas con color, fijados, etiquetas de color, orden por modificación/creación/título/duración, búsqueda en todos los discursos, papelera (30 días con deshacer).
+- **Carpetas en el panel de la biblioteca**, como en Drive: pulsa «Carpetas» en el menú lateral para verlas en el mismo espacio que la lista de discursos.
+  Entra en una carpeta con un toque y vuelve con «← Carpetas» o el botón Atrás. Busca carpetas por nombre, créalas y cambia su nombre o color desde ⋮.
+  **Mover a carpeta** está en el ⋮ de cada discurso de la lista (también al mantenerlo pulsado) y en el editor: elige el destino y pulsa «Mover».
+  Puedes moverlo entre carpetas o a «Sin carpeta», con **Deshacer**. Las notas nuevas o importadas dentro de una carpeta se guardan en ella;
+  eliminar una carpeta conserva sus discursos en «Sin carpeta».
+- Fijados, etiquetas de color, orden por modificación/creación/título/duración, búsqueda de discursos dentro de la vista abierta, papelera (30 días con deshacer).
 - Tiempo estimado de cada discurso a tu ritmo real y **tiempo objetivo** con aviso si te pasas.
 - **Historial de versiones** automático (cada 10 min de edición) y versiones con nombre que nunca se borran; restaurar guarda antes el texto actual.
 - **Importar** (botón de la lista y del menú): varios archivos `.md`, `.txt` o `.docx` a la vez (Word: títulos, negritas, listas…), o

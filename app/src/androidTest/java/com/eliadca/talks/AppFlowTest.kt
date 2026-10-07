@@ -15,6 +15,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
@@ -50,6 +54,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -283,12 +288,103 @@ class AppFlowTest {
         clickVisible("Ver con formato")
         onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
 
-        // Folders open inside the rail.
+        // Folders replace the speech list and leave the rail at its usual width.
         clickVisible("Carpetas")
-        waitForText("Nueva carpeta")
+        waitForText("Buscar carpetas")
+        assertShown("Sin carpeta")
+        assertShown("Charla A")
         Thread.sleep(400)
-        Shots.take("menu-open")
+        Shots.take("folder-library")
+        clickVisible("Todos")
+    }
+
+    @Test
+    fun foldersOpenInTheLibraryAndSpeechesCanMoveAndUndoWithoutOpeningTheEditor() {
+        assertTrue("the tablet must be in landscape", forceLandscape())
+        val (source, destination, id) = runBlocking {
+            val a = container.speeches.createFolder("Reuniones", 0xFF1E88E5.toInt())
+            val b = container.speeches.createFolder("Ensayos", 0xFF43A047.toInt())
+            val note = container.speeches.create("Discurso organizado", Markup.parse("Hola **mundo**"), a)
+            container.speeches.create("Nota suelta")
+            Triple(a, b, note)
+        }
+        waitForText("Discurso organizado")
         clickVisible("Carpetas")
+        waitForText("Buscar carpetas")
+        compose.onNodeWithText("Buscar carpetas").performTextInput("REUNIÓN")
+        clickVisible("Reuniones")
+        waitForText("Discurso organizado")
+        assertShown("Buscar en esta carpeta") // Folder navigation clears the folder-name search.
+        assertShown("Elige un discurso")
+        compose.onNodeWithText("Nota suelta").assertDoesNotExist()
+
+        fun moveTo(name: String) {
+            val previous = runBlocking { container.speeches.load(id)!!.folderId }
+            compose.onNodeWithContentDescription("Opciones de discurso: Discurso organizado").performClick()
+            clickVisible("Mover a carpeta")
+            compose.onNodeWithText("Mover").assertIsNotEnabled()
+            clickVisible(name)
+            compose.onNodeWithText("Mover").assertIsEnabled()
+            // Selecting a destination does not mutate the note until "Mover" is pressed.
+            assertEquals(previous, runBlocking { container.speeches.load(id)!!.folderId })
+            clickVisible("Mover")
+        }
+
+        moveTo("Ensayos")
+        eventually { runBlocking { container.speeches.load(id)?.takeIf { it.folderId == destination } } }
+        waitForText("Deshacer")
+        clickVisible("Deshacer")
+        eventually { runBlocking { container.speeches.load(id)?.takeIf { it.folderId == source } } }
+        waitForText("Discurso organizado")
+        moveTo("Ensayos")
+        eventually { runBlocking { container.speeches.load(id)?.takeIf { it.folderId == destination } } }
+        waitForText("Aún no hay discursos aquí")
+        compose.onNodeWithContentDescription("Volver a carpetas").performClick()
+        waitForText("Buscar carpetas")
+        clickVisible("Ensayos")
+        waitForText("Discurso organizado")
+        moveTo("Sin carpeta")
+        val saved = eventually { runBlocking { container.speeches.load(id)?.takeIf { it.folderId == null } } }
+        assertEquals("Hola mundo", saved.doc.text)
+        assertTrue("formatting survives moves", saved.doc.spans.any { it.type == SpanType.BOLD })
+        compose.onNodeWithContentDescription("Volver a carpetas").performClick()
+        waitForText("Buscar carpetas")
+        clickVisible("Sin carpeta")
+        waitForText("Discurso organizado")
+        assertShown("Nota suelta")
+        Shots.take("folders-moved-to-root")
+    }
+
+    @Test
+    fun portraitFolderNavigationLeavesTheEditorAndFolderManagementKeepsTheNotes() {
+        assertTrue("the tablet must be in portrait", forcePortrait())
+        val id = runBlocking { container.speeches.create("Nota para organizar", Markup.parse("Texto que conservar")) }
+        waitForText("Nota para organizar")
+        clickVisible("Nota para organizar")
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+        clickVisible("Carpetas")
+        waitForText("Buscar carpetas")
+        compose.onNodeWithContentDescription("Nueva carpeta").performClick()
+        compose.onNodeWithText("Nombre").performTextInput("Eventos")
+        clickVisible("Guardar")
+        waitForText("Aún no hay discursos aquí")
+        compose.onNodeWithContentDescription("Volver a carpetas").performClick()
+        waitForText("Buscar carpetas")
+        val folder = runBlocking { container.speeches.observeFolders().first().single() }
+        runBlocking { container.speeches.setFolder(id, folder.id) }
+
+        compose.onNodeWithContentDescription("Opciones de carpeta: Eventos").performClick()
+        clickVisible("Cambiar nombre y color")
+        compose.onNodeWithText("Nombre").performTextReplacement("Eventos de octubre")
+        clickVisible("Guardar")
+        waitForText("Eventos de octubre")
+        compose.onNodeWithContentDescription("Opciones de carpeta: Eventos de octubre").performClick()
+        clickVisible("Eliminar carpeta")
+        clickVisible("Eliminar")
+        eventually { runBlocking { container.speeches.load(id)?.takeIf { it.folderId == null } } }
+        clickVisible("Sin carpeta")
+        waitForText("Nota para organizar")
+        Shots.take("portrait-folders")
     }
 
     @Test

@@ -98,6 +98,29 @@ class RepositoryAndBackupTest {
         assertNotNull(repo.load(id))
     }
 
+    @Test fun movingBetweenFoldersAndBackToRootKeepsTheSameNoteAndItsVersions() = runBlocking {
+        val source = repo.createFolder("Reuniones", 0xFF1E88E5.toInt())
+        val destination = repo.createFolder("Ensayos", 0xFF43A047.toInt())
+        val doc = Markup.parse("## Apertura\nHola **mundo**. [Pausa]")
+        val id = repo.create("Mi discurso", doc, source)
+        repo.setPinned(id, true)
+        repo.setTargetMinutes(id, 5)
+        repo.saveVersion(id, "Antes de organizar")
+        val original = repo.observeItem(id).first()!!
+        val versions = repo.observeVersions(id).first()
+
+        for (folder in listOf(destination, source, null)) {
+            repo.setFolder(id, folder)
+            val loaded = repo.load(id)!!
+            assertEquals(folder, loaded.folderId)
+            assertEquals("Mi discurso", loaded.title)
+            assertEquals(doc.toJson(), loaded.doc.toJson())
+            assertEquals(original.copy(folderId = folder), repo.observeItem(id).first())
+            assertEquals(versions, repo.observeVersions(id).first())
+            assertEquals(1, repo.observeActive().first().size)
+        }
+    }
+
     @Test fun versionsAreSnapshottedOncePerIntervalAndRestoreKeepsTheCurrentText() = runBlocking {
         val id = repo.create("T", Markup.parse("uno"))
         repo.saveContent(id, "T", Markup.parse("uno dos"))
