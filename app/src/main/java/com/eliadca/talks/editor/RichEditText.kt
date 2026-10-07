@@ -1217,6 +1217,13 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
             }
             MotionEvent.ACTION_CANCEL -> checkboxTarget = -1
         }
+        if (ev.actionMasked == MotionEvent.ACTION_UP && dragged) {
+            // The end of a scroll is not a tap: no cursor move, no keyboard popping up.
+            val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+            super.onTouchEvent(cancel)
+            cancel.recycle()
+            return true
+        }
         return super.onTouchEvent(ev)
     }
 
