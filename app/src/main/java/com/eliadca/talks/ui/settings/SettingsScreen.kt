@@ -2,6 +2,14 @@ package com.eliadca.talks.ui.settings
 
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
+import com.eliadca.talks.ui.theme.accentSeed
+import com.eliadca.talks.data.AppAccent
+import com.eliadca.talks.data.AppTone
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.RecordVoiceOver
@@ -90,6 +98,16 @@ fun SettingsScreen(
                         listOf(ThemeMode.SYSTEM to "Según el sistema", ThemeMode.LIGHT to "Claro", ThemeMode.DARK to "Oscuro"),
                         settings.themeMode,
                     ) { v -> onChange { it.copy(themeMode = v) } }
+                    AccentPicker(settings.appAccent) { a -> onChange { it.copy(appAccent = a) } }
+                    ChoiceRow(
+                        "Tono de los fondos", toneLabel(settings.appTone),
+                        listOf(
+                            AppTone.TINTED to "Con un toque del color",
+                            AppTone.NEUTRAL to "Gris neutro",
+                            AppTone.BLACK to "Negro puro (en modo oscuro)",
+                        ),
+                        settings.appTone,
+                    ) { v -> onChange { it.copy(appTone = v) } }
                     SliderRow("Tamaño de letra del editor", settings.editorFontSp.toFloat(), 14f..30f, "${settings.editorFontSp} sp") { v ->
                         onChange { it.copy(editorFontSp = v.roundToInt()) }
                     }
@@ -210,6 +228,62 @@ private fun themeLabel(m: ThemeMode) = when (m) {
 private fun engineLabel(e: EngineKind) = when (e) {
     EngineKind.ANDROID -> "Servicio de voz de Android (Google)"
     EngineKind.VOSK -> "Sin conexión (Vosk)"
+}
+
+private fun toneLabel(t: AppTone): String = when (t) {
+    AppTone.TINTED -> "Con un toque del color"
+    AppTone.NEUTRAL -> "Gris neutro"
+    AppTone.BLACK -> "Negro puro"
+}
+
+/** The colour of the whole app, as a row of swatches. */
+@Composable
+private fun AccentPicker(current: AppAccent, onPick: (AppAccent) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Color de la app", style = MaterialTheme.typography.bodyLarge)
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for (a in AppAccent.entries) {
+                if (a == AppAccent.DYNAMIC && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) continue
+                val selected = a == current
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .then(
+                            if (a == AppAccent.DYNAMIC) Modifier.background(
+                                androidx.compose.ui.graphics.Brush.sweepGradient(
+                                    listOf(Color(0xFFE53935), Color(0xFFFDD835), Color(0xFF43A047), Color(0xFF1E88E5), Color(0xFF8E24AA), Color(0xFFE53935)),
+                                ),
+                            ) else Modifier.background(accentSeed(a)),
+                        )
+                        .border(if (selected) 3.dp else 0.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                        .clickable(onClickLabel = accentLabel(a)) { onPick(a) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) Icon(Icons.Filled.Check, accentLabel(a), tint = Color.White)
+                }
+            }
+        }
+        Text(accentLabel(current), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+private fun accentLabel(a: AppAccent): String = when (a) {
+    AppAccent.INDIGO -> "Índigo"
+    AppAccent.BLUE -> "Azul"
+    AppAccent.TEAL -> "Turquesa"
+    AppAccent.GREEN -> "Verde"
+    AppAccent.PURPLE -> "Morado"
+    AppAccent.PINK -> "Rosa"
+    AppAccent.RED -> "Rojo"
+    AppAccent.ORANGE -> "Naranja"
+    AppAccent.AMBER -> "Ámbar"
+    AppAccent.GRAPHITE -> "Grafito"
+    AppAccent.DYNAMIC -> "Colores del teléfono"
 }
 
 private fun markUnitLabel(u: MarkUnit): String = when (u) {

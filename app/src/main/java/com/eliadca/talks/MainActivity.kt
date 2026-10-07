@@ -108,7 +108,7 @@ private fun TalksRoot() {
     val exporter = androidx.compose.runtime.remember { Exporter(context) }
     val nav = rememberNavController()
 
-    TalksTheme(darkTheme = dark) {
+    TalksTheme(darkTheme = dark, accent = settings.appAccent, tone = settings.appTone) {
         NavHost(navController = nav, startDestination = "home") {
             composable("home") {
                 HomeScreen(

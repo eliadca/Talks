@@ -92,6 +92,8 @@ fun HomeScreen(
     var confirmDelete by remember { mutableStateOf<SpeechListItem?>(null) }
     /** Writing with the whole screen: the list of speeches is folded away. */
     var focusMode by rememberSaveable { mutableStateOf(false) }
+    /** The folders shown inside the rail. */
+    var foldersOpen by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(selectedId) { editor.open(selectedId) }
     LaunchedEffect(Unit) {
@@ -138,7 +140,7 @@ fun HomeScreen(
     ) {
         val showRail = maxWidth >= RAIL_MIN_WIDTH
         val listWidth = if (maxWidth >= 1200.dp) 360.dp else 330.dp
-        val railWidth = if (showRail) RAIL_WIDTH else 0.dp
+        val railWidth = if (!showRail) 0.dp else if (foldersOpen) RAIL_OPEN_WIDTH else RAIL_WIDTH
         val twoPane = maxWidth - railWidth - listWidth >= MIN_EDITOR_WIDTH
 
         val list: @Composable (Modifier) -> Unit = { mod ->
@@ -154,7 +156,8 @@ fun HomeScreen(
                 onMenu = openMenu,
                 onQuery = home::setQuery,
                 onSort = home::setSort,
-                onSelect = home::select,
+                // A speech opens with the whole screen to write; the list comes back with one tap.
+                onSelect = { id -> home.select(id); focusMode = true },
                 onNew = home::createSpeech,
                 onTogglePin = home::togglePin,
                 onDuplicate = home::duplicate,
@@ -255,15 +258,19 @@ fun HomeScreen(
                     LibraryRail(
                         filter = filter,
                         counts = counts,
-                        onMenu = openMenu,
+                        folders = folders,
+                        foldersOpen = foldersOpen,
+                        onToggleFolders = { foldersOpen = !foldersOpen },
                         onNewSpeech = home::createSpeech,
                         onFilter = { f ->
                             home.setFilter(f)
                             focusMode = false
                         },
-                        onFolders = openMenu,
+                        onNewFolder = home::createFolder,
+                        onUpdateFolder = home::updateFolder,
+                        onDeleteFolder = home::deleteFolder,
                         onSettings = onOpenSettings,
-                        modifier = Modifier.width(RAIL_WIDTH).fillMaxHeight(),
+                        modifier = Modifier.width(if (foldersOpen) RAIL_OPEN_WIDTH else RAIL_WIDTH).fillMaxHeight(),
                     )
                 }
                 if (twoPane) {
@@ -315,6 +322,7 @@ fun HomeScreen(
 /** From this width on, the menu is a slim rail at the side. */
 private val RAIL_MIN_WIDTH: Dp = 600.dp
 private val RAIL_WIDTH: Dp = 88.dp
+private val RAIL_OPEN_WIDTH: Dp = 236.dp
 
 /** The editor next to the list must be at least this wide; otherwise they take turns. */
 private val MIN_EDITOR_WIDTH: Dp = 520.dp

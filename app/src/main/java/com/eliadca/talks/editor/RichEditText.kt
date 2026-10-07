@@ -101,6 +101,14 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
     /** Where on the thumb the finger took hold of it. */
     private var barGrab = 0f
 
+    // --- smooth scrolling: a flick keeps the page gliding --------------------------------------
+
+    private val flinger = android.widget.OverScroller(context)
+    private var velocity: android.view.VelocityTracker? = null
+    private var dragged = false
+    private val minFling = ViewConfiguration.get(context).scaledMinimumFlingVelocity
+    private val maxFling = ViewConfiguration.get(context).scaledMaximumFlingVelocity
+
     init {
         background = null
         gravity = Gravity.TOP or Gravity.START
@@ -229,6 +237,48 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
         if (track - thumb <= 0f) return
         val f = ((y - barGrab - inset) / (track - thumb)).coerceIn(0f, 1f)
         scrollTo(0, (f * maxScroll).roundToInt())
+    }
+
+    /** Follows the finger; when it leaves the page with speed, the page glides on and slows down. */
+    private fun trackFling(ev: MotionEvent) {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // A touch stops a glide where it is.
+                if (!flinger.isFinished) flinger.forceFinished(true)
+                velocity?.recycle()
+                velocity = android.view.VelocityTracker.obtain()
+                velocity?.addMovement(ev)
+                dragged = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                velocity?.addMovement(ev)
+                if (abs(ev.y - downY) > touchSlop) dragged = true
+            }
+            MotionEvent.ACTION_UP -> {
+                val v = velocity
+                if (v != null && dragged) {
+                    v.addMovement(ev)
+                    v.computeCurrentVelocity(1000, maxFling.toFloat())
+                    val vy = v.yVelocity
+                    val maxScroll = maxScrollY()
+                    if (abs(vy) > minFling && maxScroll > 0) {
+                        flinger.fling(0, scrollY, 0, -vy.toInt(), 0, 0, 0, maxScroll)
+                        postInvalidateOnAnimation()
+                    }
+                }
+                velocity?.recycle(); velocity = null
+            }
+            MotionEvent.ACTION_CANCEL -> { velocity?.recycle(); velocity = null }
+        }
+    }
+
+    override fun computeScroll() {
+        if (flinger.computeScrollOffset()) {
+            scrollTo(0, flinger.currY.coerceIn(0, maxScrollY()))
+            postInvalidateOnAnimation()
+            return
+        }
+        super.computeScroll()
     }
 
     /** Starts dragging the scroll bar when a touch lands on its strip at the right edge. */
@@ -1148,6 +1198,7 @@ class RichEditText(context: Context, val style: EditorStyle) : EditText(context)
 
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         if (touchScrollBar(ev)) return true
+        trackFling(ev)
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = ev.x; downY = ev.y

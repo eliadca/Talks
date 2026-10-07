@@ -478,8 +478,7 @@ private fun MarkdownEditor(controller: com.eliadca.talks.editor.EditorController
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                     android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                 setHorizontallyScrolling(false)
-                isVerticalScrollBarEnabled = true
-                isScrollbarFadingEnabled = false
+                // No platform scroll bar here: switched on in code it has nothing to draw with.
                 setLineSpacing(0f, 1.25f)
                 setText(controller.markdown ?: "")
                 addTextChangedListener(object : android.text.TextWatcher {

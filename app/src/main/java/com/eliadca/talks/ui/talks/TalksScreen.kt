@@ -55,6 +55,8 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -280,7 +282,7 @@ fun TalksScreen(
 
     // Panels and dialogs follow the stage: dark on a dark stage, light on a light one.
     val darkStage = Color(palette.background).luminance() < 0.5f
-    TalksTheme(darkTheme = darkStage) {
+    TalksTheme(darkTheme = darkStage, accent = settings.appAccent, tone = settings.appTone) {
     Box(
         Modifier
             .fillMaxSize()
@@ -360,14 +362,8 @@ fun TalksScreen(
                     if (hasMic) vm.begin() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 },
                 onCancel = onExit,
-                // Beside the text on a landscape tablet, so the speech stays in view; below it otherwise.
-                modifier = if (androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
-                    android.content.res.Configuration.ORIENTATION_LANDSCAPE
-                ) {
-                    Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(460.dp)
-                } else {
-                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = 640.dp)
-                },
+                palette = palette,
+                modifier = Modifier.align(Alignment.BottomCenter),
             )
             TalksPhase.LIVE -> if (session != null) {
                 LiveOverlay(
@@ -1052,6 +1048,7 @@ private fun PreparePanel(
     onChangeSettings: ((AppSettings) -> AppSettings) -> Unit,
     onStart: () -> Unit,
     onCancel: () -> Unit,
+    palette: ReaderPalette,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1064,207 +1061,124 @@ private fun PreparePanel(
         EngineKind.VOSK -> voskInstalled
     }
     val canStart = engineReady
+    val ink = Color(palette.text)
+    val accent = Color(palette.accent)
+    val bar = Color(palette.background).copy(alpha = 0.94f)
+    var markingOpen by remember { mutableStateOf(false) }
+    val startsAtBeginning = vm.startToken == 0
 
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        modifier.padding(16.dp),
-        shape = RoundedCornerShape(32.dp),
-        color = colors.surface,
-        tonalElevation = 4.dp,
-        shadowElevation = 16.dp,
+    // Same look as the bar of the live controls, at the bottom; what needs attention floats above it.
+    Column(
+        modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp).widthIn(max = 1180.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(Modifier.padding(horizontal = 22.dp, vertical = 20.dp)) {
-            // --- the speech ---
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(52.dp).clip(RoundedCornerShape(18.dp)).background(colors.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.RecordVoiceOver, null, tint = colors.onPrimaryContainer, modifier = Modifier.size(28.dp))
+        val note: String? = when {
+            !hasMic -> "Talks necesita el micrófono para escucharte."
+            !engineReady && settings.engine == EngineKind.ANDROID -> "Este dispositivo no tiene servicio de voz. Usa «Vosk» (sin conexión)."
+            vm.testError != null -> vm.testError?.message
+            vm.testing && vm.testHeard.isBlank() -> "Habla en voz alta, como en el escenario…"
+            vm.testing -> "«${vm.testHeard}»"
+            !startsAtBeginning -> vm.index?.let { ix ->
+                val from = ix.startChar(vm.startToken)
+                "Empiezas desde «" + ix.text.substring(from, minOf(ix.text.length, from + 60)).replace('\n', ' ') + "…»"
+            }
+            else -> "Mantén pulsada una palabra del texto para empezar desde ahí."
+        }
+        if (note != null) {
+            Surface(shape = RoundedCornerShape(50), color = bar, border = BorderStroke(1.dp, ink.copy(alpha = 0.16f)), shadowElevation = 6.dp) {
+                Column(Modifier.padding(horizontal = 18.dp, vertical = 9.dp).widthIn(max = 720.dp)) {
+                    Text(note, color = ink, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (vm.testing) {
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(progress = { vm.testLevel }, color = accent, modifier = Modifier.width(220.dp).height(4.dp))
+                    }
                 }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
+            }
+        }
+        if (settings.engine == EngineKind.VOSK && !voskInstalled) {
+            Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
+                Column(Modifier.padding(16.dp).widthIn(max = 560.dp)) {
+                    Text("Falta el modelo de voz sin conexión (unos 40 MB).", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    ModelControls(model, onImportModel)
+                }
+            }
+        }
+        if (markingOpen) {
+            MarkingBar(
+                settings.marking(),
+                palette,
+                LiveActions(
+                    onToggleLock = {}, onFollow = {}, onFollowFromHere = {}, onManual = {}, onPauseResume = {},
+                    onAuto = {}, onAutoSpeed = {}, onFont = {}, onTheme = {},
+                    onMarking = { markingOpen = false },
+                    onMarkUnit = { u -> onChangeSettings { it.copy(markUnit = u) } },
+                    onMarkLead = { d -> onChangeSettings { it.copy(markLead = (it.markLead + d).coerceIn(Marking.MIN_LEAD, Marking.MAX_LEAD)) } },
+                    onFinish = {}, onRetry = {},
+                ),
+            )
+        }
+
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = bar,
+            border = BorderStroke(1.dp, ink.copy(alpha = 0.16f)),
+            shadowElevation = 10.dp,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 8.dp).horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Column(Modifier.widthIn(max = 280.dp).padding(horizontal = 8.dp)) {
                     Text(
                         vm.speech?.title?.ifBlank { "Sin título" } ?: "",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        color = ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
-                        InfoChip("≈ ${formatDuration(seconds)}")
-                        (vm.speech?.targetMinutes ?: 0).takeIf { it > 0 }?.let { InfoChip("Objetivo $it min") }
-                        InfoChip("${settings.wordsPerMinute} pal/min")
-                    }
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-
-            Column(
-                Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                // --- ready to listen ---
-                PrepareCard("Listo para escucharte") {
-                    CheckRow(
-                        ok = hasMic, title = "Micrófono",
-                        detail = if (hasMic) "Permiso concedido" else "Talks necesita el micrófono para escucharte.",
-                    ) {
-                        if (!hasMic) Button(onClick = onRequestMic) { Text("Conceder permiso") }
-                    }
-                    val engineDetail = when (settings.engine) {
-                        EngineKind.ANDROID ->
-                            if (serviceAvailable) "Servicio de voz de Android · ${settings.language}" + if (settings.preferOffline) " · sin conexión preferido" else ""
-                            else "Este dispositivo no tiene servicio de reconocimiento. Usa el modo sin conexión."
-                        EngineKind.VOSK ->
-                            if (voskInstalled) "Sin conexión (Vosk) · modelo instalado, ${remember(voskInstalled) { model.manager.sizeOnDiskMb() }} MB"
-                            else "Falta el modelo de voz sin conexión (unos 40 MB)."
-                    }
-                    CheckRow(ok = engineReady, title = "Reconocimiento de voz", detail = engineDetail) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
-                                selected = settings.engine == EngineKind.ANDROID,
-                                onClick = { onChangeSettings { it.copy(engine = EngineKind.ANDROID) } },
-                                label = { Text("Android") },
-                            )
-                            FilterChip(
-                                selected = settings.engine == EngineKind.VOSK,
-                                onClick = { onChangeSettings { it.copy(engine = EngineKind.VOSK) } },
-                                label = { Text("Sin conexión (Vosk)") },
-                            )
-                        }
-                        if (settings.engine == EngineKind.VOSK) ModelControls(model, onImportModel)
-                    }
-                    // Microphone test
-                    CheckRow(
-                        ok = null, title = "Prueba de reconocimiento",
-                        detail = when {
-                            vm.testError != null -> vm.testError?.message ?: ""
-                            vm.testing && vm.testHeard.isBlank() -> "Habla en voz alta, como en el escenario…"
-                            vm.testing -> "«${vm.testHeard}»"
-                            else -> "Comprueba que la app te entiende antes de empezar."
-                        },
-                    ) {
-                        if (vm.testing) {
-                            LinearProgressIndicator(progress = { vm.testLevel }, modifier = Modifier.fillMaxWidth().height(6.dp))
-                        }
-                        OutlinedButton(
-                            onClick = { if (vm.testing) vm.stopTest() else if (hasMic) vm.startTest() else onRequestMic() },
-                            enabled = engineReady,
-                        ) {
-                            Icon(Icons.Filled.Mic, null, Modifier.size(18.dp))
-                            Spacer(Modifier.size(6.dp))
-                            Text(if (vm.testing) "Detener prueba" else "Probar micrófono")
-                        }
-                    }
-                }
-
-                // --- how the text is marked ---
-                PrepareCard("Cómo se marca lo que viene") {
-                    Row(
-                        Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        for ((unit, label) in MARK_UNITS) {
-                            FilterChip(
-                                selected = settings.markUnit == unit,
-                                onClick = { onChangeSettings { it.copy(markUnit = unit) } },
-                                label = { Text(label) },
-                            )
-                        }
-                    }
-                    if (settings.markUnit != MarkUnit.NONE) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(
-                                onClick = { onChangeSettings { it.copy(markLead = (it.markLead - 1).coerceIn(Marking.MIN_LEAD, Marking.MAX_LEAD)) } },
-                                enabled = settings.markLead > Marking.MIN_LEAD,
-                            ) { Text("− Atrasar") }
-                            Text(
-                                leadLabel(settings.markLead),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f),
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            )
-                            TextButton(
-                                onClick = { onChangeSettings { it.copy(markLead = (it.markLead + 1).coerceIn(Marking.MIN_LEAD, Marking.MAX_LEAD)) } },
-                                enabled = settings.markLead < Marking.MAX_LEAD,
-                            ) { Text("Adelantar +") }
-                        }
-                    }
-                }
-
-                // --- where to start ---
-                val startsAtBeginning = vm.startToken == 0
-                PrepareCard("Dónde empezar") {
                     Text(
-                        if (startsAtBeginning) {
-                            "Desde el principio. Mantén pulsada una palabra del texto para empezar desde ahí."
-                        } else {
-                            val ix = vm.index
-                            val snippet = ix?.text?.let { t ->
-                                val from = ix.startChar(vm.startToken)
-                                t.substring(from, minOf(t.length, from + 60)).replace('\n', ' ')
-                            } ?: ""
-                            "Desde «$snippet…»"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant,
+                        "≈ ${formatDuration(seconds)}" + ((vm.speech?.targetMinutes ?: 0).takeIf { it > 0 }?.let { " · objetivo $it min" } ?: ""),
+                        color = ink.copy(alpha = 0.7f), fontSize = 13.sp, maxLines = 1,
                     )
-                    if (!startsAtBeginning) TextButton(onClick = vm::resetStart) { Text("Volver al principio") }
                 }
-            }
-
-            // --- start ---
-            Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = onStart,
-                enabled = canStart,
-                modifier = Modifier.fillMaxWidth().height(60.dp),
-                shape = RoundedCornerShape(20.dp),
-            ) {
-                Icon(Icons.Filled.PlayArrow, null, Modifier.size(28.dp))
-                Spacer(Modifier.size(10.dp))
-                Text("COMENZAR", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            }
-            TextButton(
-                onClick = {
+                BarDivider(ink)
+                BarButton(
+                    if (hasMic) Icons.Filled.Mic else Icons.Filled.MicOff,
+                    if (hasMic) "Micrófono" else "Permitir", ink, accent, active = !hasMic,
+                ) { if (!hasMic) onRequestMic() }
+                BarButton(
+                    Icons.Filled.RecordVoiceOver,
+                    if (settings.engine == EngineKind.ANDROID) "Voz: Android" else "Voz: Vosk", ink, accent,
+                ) {
+                    onChangeSettings { it.copy(engine = if (it.engine == EngineKind.ANDROID) EngineKind.VOSK else EngineKind.ANDROID) }
+                }
+                BarButton(Icons.Filled.GraphicEq, if (vm.testing) "Detener" else "Probar", ink, accent, active = vm.testing) {
+                    if (vm.testing) vm.stopTest() else if (hasMic) vm.startTest() else onRequestMic()
+                }
+                BarButton(Icons.Filled.FormatUnderlined, "Marcado", ink, accent, active = markingOpen) { markingOpen = !markingOpen }
+                if (!startsAtBeginning) {
+                    BarButton(Icons.Filled.Replay, "Al inicio", ink, accent) { vm.resetStart() }
+                }
+                BarDivider(ink)
+                BarButton(Icons.Filled.Close, "Salir", ink, accent) {
                     vm.stopTest()
                     onCancel()
-                },
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            ) { Text("Cancelar") }
+                }
+                Spacer(Modifier.width(8.dp))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(if (canStart) accent else ink.copy(alpha = 0.15f))
+                        .clickable(enabled = canStart, onClick = onStart)
+                        .padding(horizontal = 26.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.PlayArrow, null, tint = if (canStart) contentOn(accent) else ink, modifier = Modifier.size(28.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("COMENZAR", color = if (canStart) contentOn(accent) else ink, fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                }
+            }
         }
-    }
-}
-
-/** A small piece of information about the speech, in a pill. */
-@Composable
-private fun InfoChip(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSecondaryContainer,
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    )
-}
-
-/** One group of the preparation panel, on a soft card. */
-@Composable
-private fun PrepareCard(title: String, content: @Composable () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        content()
     }
 }
 

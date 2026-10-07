@@ -13,6 +13,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.eliadca.talks.data.ThemeMode
+import com.eliadca.talks.data.AppAccent
+import com.eliadca.talks.data.AppTone
+import android.os.Build
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
 
 private val Indigo = Color(0xFF3F4FD8)
 
@@ -95,9 +102,95 @@ fun isDarkFor(mode: ThemeMode): Boolean = when (mode) {
     ThemeMode.DARK -> true
 }
 
+/** The seed colour of each accent the app can wear. */
+fun accentSeed(a: AppAccent): Color = when (a) {
+    AppAccent.INDIGO, AppAccent.DYNAMIC -> Indigo
+    AppAccent.BLUE -> Color(0xFF1E6FD9)
+    AppAccent.TEAL -> Color(0xFF00897B)
+    AppAccent.GREEN -> Color(0xFF2E7D32)
+    AppAccent.PURPLE -> Color(0xFF7B3FC4)
+    AppAccent.PINK -> Color(0xFFC2185B)
+    AppAccent.RED -> Color(0xFFC62828)
+    AppAccent.ORANGE -> Color(0xFFE0611A)
+    AppAccent.AMBER -> Color(0xFFB98500)
+    AppAccent.GRAPHITE -> Color(0xFF4A5058)
+}
+
+private fun mix(a: Color, b: Color, t: Float): Color = lerp(a, b, t)
+
+/** A full colour scheme grown from one seed colour. */
+private fun schemeFor(seed: Color, dark: Boolean, tone: AppTone): ColorScheme {
+    val tint = when (tone) { AppTone.TINTED -> 1f; else -> 0f }
+    val ink = if (dark) Color(0xFFE6E6EE) else Color(0xFF1A1B22)
+    return if (!dark) {
+        val bg = mix(Color(0xFFF7F7F8), mix(seed, Color.White, 0.94f), tint)
+        val sv = mix(Color(0xFFEAEAED), mix(seed, Color.White, 0.86f), tint)
+        LightColors.copy(
+            primary = seed,
+            onPrimary = Color.White,
+            primaryContainer = mix(seed, Color.White, 0.82f),
+            onPrimaryContainer = mix(seed, Color.Black, 0.62f),
+            secondary = mix(seed, Color(0xFF5B5E6E), 0.55f),
+            secondaryContainer = mix(seed, Color.White, 0.86f),
+            onSecondaryContainer = mix(seed, Color.Black, 0.7f),
+            background = bg,
+            onBackground = ink,
+            surface = Color.White,
+            onSurface = ink,
+            surfaceVariant = sv,
+            surfaceContainerLow = mix(bg, Color.White, 0.3f),
+            surfaceContainer = mix(bg, sv, 0.4f),
+            surfaceContainerHigh = mix(bg, sv, 0.7f),
+            surfaceContainerHighest = sv,
+            outlineVariant = mix(sv, Color.Black, 0.12f),
+        )
+    } else {
+        val primary = mix(seed, Color.White, 0.45f)
+        val base = when (tone) {
+            AppTone.BLACK -> Color.Black
+            AppTone.NEUTRAL -> Color(0xFF121214)
+            AppTone.TINTED -> mix(seed, Color(0xFF0F1014), 0.9f)
+        }
+        val surface = if (tone == AppTone.BLACK) Color(0xFF0B0B0D) else mix(base, Color.White, 0.03f)
+        val sv = if (tone == AppTone.TINTED) mix(seed, Color(0xFF2A2C34), 0.82f) else Color(0xFF2B2B30)
+        DarkColors.copy(
+            primary = primary,
+            onPrimary = mix(seed, Color.Black, 0.55f),
+            primaryContainer = mix(seed, Color.Black, 0.45f),
+            onPrimaryContainer = mix(seed, Color.White, 0.82f),
+            secondary = mix(primary, Color(0xFFC4C4CC), 0.5f),
+            secondaryContainer = mix(seed, Color(0xFF2E3038), 0.7f),
+            onSecondaryContainer = mix(seed, Color.White, 0.85f),
+            background = base,
+            onBackground = ink,
+            surface = surface,
+            onSurface = ink,
+            surfaceVariant = sv,
+            surfaceContainerLowest = base,
+            surfaceContainerLow = mix(surface, sv, 0.2f),
+            surfaceContainer = mix(surface, sv, 0.35f),
+            surfaceContainerHigh = mix(surface, sv, 0.6f),
+            surfaceContainerHighest = sv,
+            outlineVariant = mix(sv, Color.White, 0.1f),
+        )
+    }
+}
+
 @Composable
-fun TalksTheme(darkTheme: Boolean, content: @Composable () -> Unit) {
-    val colors = if (darkTheme) DarkColors else LightColors
+fun TalksTheme(
+    darkTheme: Boolean,
+    accent: AppAccent = AppAccent.INDIGO,
+    tone: AppTone = AppTone.TINTED,
+    content: @Composable () -> Unit,
+) {
+    val context = LocalContext.current
+    val colors = when {
+        accent == AppAccent.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (darkTheme) dynamicDarkColorScheme(context).let { if (tone == AppTone.BLACK) it.copy(background = Color.Black, surfaceContainerLowest = Color.Black) else it }
+            else dynamicLightColorScheme(context)
+        accent == AppAccent.INDIGO && tone == AppTone.TINTED -> if (darkTheme) DarkColors else LightColors
+        else -> schemeFor(accentSeed(accent), darkTheme, tone)
+    }
     MaterialTheme(colorScheme = colors, shapes = TalksShapes) {
         // Text and icons that set no colour of their own (screen titles, toolbar icons) would
         // otherwise be black, which disappears on a dark background.

@@ -1,6 +1,7 @@
 package com.eliadca.talks.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,87 +68,146 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.FileDownload
 
 /**
- * The menu folded into a slim rail: new speech, the main lists, folders (which open the full
- * menu) and the settings at the bottom. Nothing here reacts to swipes, so scrolling a speech
- * never opens a menu by accident.
+ * The menu folded into a slim rail of floating buttons on the screen's own background: new speech,
+ * the main lists, folders, trash and settings. "Carpetas" opens the folders right inside the rail;
+ * picking one shows what it holds. Nothing here reacts to swipes.
  */
 @Composable
 fun LibraryRail(
     filter: LibraryFilter,
     counts: LibraryCounts,
-    onMenu: () -> Unit,
+    folders: List<FolderEntity>,
+    foldersOpen: Boolean,
+    onToggleFolders: () -> Unit,
     onNewSpeech: () -> Unit,
     onFilter: (LibraryFilter) -> Unit,
-    onFolders: () -> Unit,
+    onNewFolder: (String, Int) -> Unit,
+    onUpdateFolder: (FolderEntity) -> Unit,
+    onDeleteFolder: (Long) -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
-    val itemColors = NavigationRailItemDefaults.colors(
-        selectedIconColor = colors.onSecondaryContainer,
-        indicatorColor = colors.secondaryContainer,
-    )
-    NavigationRail(
-        modifier = modifier,
-        containerColor = colors.surfaceContainer,
-        // The screen already keeps clear of the system bars.
-        windowInsets = WindowInsets(0, 0, 0, 0),
-        header = {
-            IconButton(onClick = onMenu) { Icon(Icons.Filled.Menu, contentDescription = "Abrir el menú") }
-            FloatingActionButton(
-                onClick = onNewSpeech,
-                containerColor = colors.primary,
-                contentColor = colors.onPrimary,
-                elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation(),
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "Nuevo discurso")
-            }
-        },
+    var folderDialog by remember { mutableStateOf<FolderEntity?>(null) }
+    var newFolder by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf<FolderEntity?>(null) }
+
+    Column(
+        modifier
+            .background(colors.background)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Spacer(Modifier.height(16.dp))
-        NavigationRailItem(
-            selected = filter == LibraryFilter.All,
-            onClick = { onFilter(LibraryFilter.All) },
-            icon = { Icon(Icons.Filled.Description, contentDescription = null) },
-            label = { Text("Todos") },
-            colors = itemColors,
+        // New speech: the one strong colour of the rail.
+        androidx.compose.material3.Surface(
+            onClick = onNewSpeech,
+            shape = RoundedCornerShape(20.dp),
+            color = colors.primary,
+            contentColor = colors.onPrimary,
+            shadowElevation = 6.dp,
+            modifier = Modifier.size(60.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.Add, contentDescription = "Nuevo discurso", modifier = Modifier.size(28.dp)) }
+        }
+        Spacer(Modifier.height(6.dp))
+        RailButton(Icons.Filled.Description, "Todos", filter == LibraryFilter.All) { onFilter(LibraryFilter.All) }
+        RailButton(Icons.Filled.PushPin, "Fijados", filter == LibraryFilter.Pinned) { onFilter(LibraryFilter.Pinned) }
+        RailButton(
+            if (foldersOpen) Icons.Filled.FolderOpen else Icons.Filled.Folder, "Carpetas",
+            foldersOpen || filter is LibraryFilter.Folder || filter == LibraryFilter.NoFolder,
+            onClick = onToggleFolders,
         )
-        NavigationRailItem(
-            selected = filter == LibraryFilter.Pinned,
-            onClick = { onFilter(LibraryFilter.Pinned) },
-            icon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
-            label = { Text("Fijados") },
-            colors = itemColors,
-        )
-        NavigationRailItem(
-            selected = filter is LibraryFilter.Folder || filter == LibraryFilter.NoFolder,
-            onClick = onFolders,
-            icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
-            label = { Text("Carpetas") },
-            colors = itemColors,
-        )
-        NavigationRailItem(
-            selected = filter == LibraryFilter.Trash,
-            onClick = { onFilter(LibraryFilter.Trash) },
-            icon = {
-                if (counts.trash > 0) {
-                    BadgedBox(badge = { Badge { Text(counts.trash.toString()) } }) { Icon(Icons.Filled.Delete, contentDescription = null) }
-                } else {
-                    Icon(Icons.Filled.Delete, contentDescription = null)
+        AnimatedVisibility(foldersOpen) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(colors.surfaceContainer)
+                    .padding(6.dp),
+            ) {
+                NavRow(Icons.Filled.FolderOpen, "Sin carpeta", counts.noFolder, filter == LibraryFilter.NoFolder) { onFilter(LibraryFilter.NoFolder) }
+                for (f in folders) {
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        NavRow(
+                            Icons.Filled.Folder, f.name, counts.perFolder[f.id] ?: 0,
+                            filter == LibraryFilter.Folder(f.id), tint = Color(f.color),
+                            onLongClick = { menu = true },
+                        ) { onFilter(LibraryFilter.Folder(f.id)) }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Cambiar nombre y color") },
+                                leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                                onClick = { menu = false; folderDialog = f },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Eliminar carpeta") },
+                                leadingIcon = { Icon(Icons.Filled.Delete, null) },
+                                onClick = { menu = false; confirmDelete = f },
+                            )
+                        }
+                    }
                 }
-            },
-            label = { Text("Papelera") },
-            colors = itemColors,
+                NavRow(Icons.Filled.CreateNewFolder, "Nueva carpeta", null, false, tint = colors.primary) { newFolder = true }
+            }
+        }
+        RailButton(Icons.Filled.Delete, "Papelera", filter == LibraryFilter.Trash, badge = counts.trash) { onFilter(LibraryFilter.Trash) }
+        RailButton(Icons.Filled.Settings, "Ajustes", false, onClick = onSettings)
+    }
+
+    if (newFolder) {
+        FolderDialog(null, onSave = { name, color -> onNewFolder(name, color); newFolder = false }, onDismiss = { newFolder = false })
+    }
+    folderDialog?.let { f ->
+        FolderDialog(f, onSave = { name, color -> onUpdateFolder(f.copy(name = name, color = color)); folderDialog = null }, onDismiss = { folderDialog = null })
+    }
+    confirmDelete?.let { f ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("¿Eliminar la carpeta «${f.name}»?") },
+            text = { Text("Los discursos que contiene no se borran: pasan a «Sin carpeta».") },
+            confirmButton = { TextButton(onClick = { onDeleteFolder(f.id); confirmDelete = null }) { Text("Eliminar") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancelar") } },
         )
-        Spacer(Modifier.weight(1f))
-        NavigationRailItem(
-            selected = false,
-            onClick = onSettings,
-            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-            label = { Text("Ajustes") },
-            colors = itemColors,
+    }
+}
+
+/** A floating button of the rail: a soft raised tile with its label under it. */
+@Composable
+private fun RailButton(icon: ImageVector, label: String, selected: Boolean, badge: Int = 0, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .combinedClickable(onClick = onClick)
+            .padding(vertical = 4.dp, horizontal = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        androidx.compose.material3.Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = if (selected) colors.primaryContainer else colors.background,
+            contentColor = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
+            shadowElevation = if (selected) 2.dp else 5.dp,
+            modifier = Modifier.size(width = 56.dp, height = 46.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                if (badge > 0) {
+                    BadgedBox(badge = { Badge { Text(badge.toString()) } }) { Icon(icon, contentDescription = null) }
+                } else {
+                    Icon(icon, contentDescription = null)
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) colors.primary else colors.onSurfaceVariant,
+            maxLines = 1,
         )
-        Spacer(Modifier.height(12.dp))
     }
 }
 

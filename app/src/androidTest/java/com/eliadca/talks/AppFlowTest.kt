@@ -267,20 +267,28 @@ class AppFlowTest {
         assertShown("Elige un discurso")
         compose.onAllNodesWithText("Charla A")[0].performClick()
         onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
-        Shots.take("tablet-landscape-editing")
-
-        // Writing with the whole screen folds the list away, and brings it back.
-        compose.onNodeWithContentDescription("Escribir a pantalla completa").performClick()
-        compose.waitForIdle()
-        Shots.take("tablet-focus")
-        compose.onNodeWithContentDescription("Mostrar la lista de discursos").performClick()
-
-        // The full menu opens from the rail.
-        compose.onNodeWithContentDescription("Abrir el menú").performClick()
+        // A speech opens with the whole screen; the list comes back with one tap.
         compose.waitForIdle()
         Thread.sleep(400)
+        Shots.take("tablet-focus")
+        compose.onNodeWithContentDescription("Mostrar la lista de discursos").performClick()
+        compose.waitForIdle()
+        Shots.take("tablet-landscape-editing")
+
+        // The speech as Markdown, edited as plain text, and back.
+        compose.onNodeWithContentDescription("Ver y editar el Markdown").performClick()
+        waitForText("Ver con formato")
+        Thread.sleep(400)
+        Shots.take("editor-markdown")
+        clickVisible("Ver con formato")
+        onView(isAssignableFrom(RichEditText::class.java)).check(matches(isDisplayed()))
+
+        // Folders open inside the rail.
+        clickVisible("Carpetas")
+        waitForText("Nueva carpeta")
+        Thread.sleep(400)
         Shots.take("menu-open")
-        compose.onNodeWithContentDescription("Cerrar el menú").performClick()
+        clickVisible("Carpetas")
     }
 
     @Test

@@ -18,6 +18,12 @@ import java.util.Locale
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
+/** The colour of the whole app; DYNAMIC takes the phone's own colours (Android 12 and later). */
+enum class AppAccent { INDIGO, BLUE, TEAL, GREEN, PURPLE, PINK, RED, ORANGE, AMBER, GRAPHITE, DYNAMIC }
+
+/** How the backgrounds are toned: with a touch of the colour, plain grey, or pure black in dark mode. */
+enum class AppTone { TINTED, NEUTRAL, BLACK }
+
 /** Which speech recogniser Talks mode listens with. */
 enum class EngineKind { ANDROID, VOSK }
 
@@ -27,6 +33,8 @@ enum class ReaderFont { SANS, SERIF }
 
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val appAccent: AppAccent = AppAccent.INDIGO,
+    val appTone: AppTone = AppTone.TINTED,
 
     // Speech recognition
     val language: String = "es-US",
@@ -119,6 +127,8 @@ class SettingsRepository(private val context: Context) {
         val dimSpoken = booleanPreferencesKey("dimSpoken")
         val editorFontSp = intPreferencesKey("editorFontSp")
         val editorSerif = booleanPreferencesKey("editorSerif")
+        val appAccent = stringPreferencesKey("appAccent")
+        val appTone = stringPreferencesKey("appTone")
         val seeded = booleanPreferencesKey("seeded")
         val templateSeeded = booleanPreferencesKey("templateSeeded")
     }
@@ -133,6 +143,8 @@ class SettingsRepository(private val context: Context) {
         val d = defaults
         return AppSettings(
             themeMode = p[K.theme].toEnum(d.themeMode),
+            appAccent = p[K.appAccent].toEnum(d.appAccent),
+            appTone = p[K.appTone].toEnum(d.appTone),
             language = p[K.language] ?: d.language,
             engine = p[K.engine].toEnum(d.engine),
             preferOffline = p[K.preferOffline] ?: d.preferOffline,
@@ -164,6 +176,8 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { p ->
             val s = transform(read(p))
             p[K.theme] = s.themeMode.name
+            p[K.appAccent] = s.appAccent.name
+            p[K.appTone] = s.appTone.name
             p[K.language] = s.language
             p[K.engine] = s.engine.name
             p[K.preferOffline] = s.preferOffline

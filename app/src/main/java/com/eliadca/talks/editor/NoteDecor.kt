@@ -58,6 +58,8 @@ object NoteDecor {
         if (e <= s) return
         val first = l.getLineForOffset(s)
         val last = l.getLineForOffset(e - 1)
+        // Around the letters themselves: the line's own descent also holds the space between lines.
+        val fm = l.paint.fontMetrics
         for (line in maxOf(first, visibleFirst)..minOf(last, visibleLast)) {
             val left = if (line == first) l.getPrimaryHorizontal(s) else l.getLineLeft(line)
             var right = if (line == last) l.getPrimaryHorizontal(e) else l.getLineRight(line)
@@ -65,7 +67,7 @@ object NoteDecor {
             if (right <= left) right = l.getLineRight(line)
             if (right <= left) continue
             val baseline = l.getLineBaseline(line).toFloat()
-            rect.set(left - padX, baseline + l.getLineAscent(line) * 0.95f, right + padX, baseline + l.getLineDescent(line))
+            rect.set(left - padX, baseline + fm.ascent * 0.92f, right + padX, baseline + fm.descent * 1.15f)
             canvas.drawRoundRect(rect, radius, radius, paint)
         }
     }
