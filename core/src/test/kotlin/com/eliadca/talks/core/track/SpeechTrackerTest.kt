@@ -150,14 +150,26 @@ class SpeechTrackerTest {
         assertTrue("lost at ${t.state.position}", kotlin.math.abs(t.state.position - (here + 12)) <= 3)
     }
 
-    @Test fun reallyGoingBackToReadAPassageAgainIsFollowed() {
+    @Test fun readingAPassageAgainNeverTakesTheMarkerBack() {
         val ix = withReference
         val words = ix.tokens.map { it.norm }
         val t = SpeechTracker(ix)
         read(t, words, 0, 120)
-        // The speaker lost the thread and reads two sentences again from word 40.
-        read(t, words, 40, 70)
-        assertTrue("did not follow back: ${t.state.position}", kotlin.math.abs(t.state.position - 70) <= 3)
+        // Two sentences read again from word 40: what was read stays read.
+        read(t, words, 40, 70) { assertTrue("went back to $it", it >= 118) }
+        // Back where they were, the marker goes on with them.
+        read(t, words, 120, 130)
+        assertTrue("lost at ${t.state.position}", kotlin.math.abs(t.state.position - 130) <= 3)
+    }
+
+    @Test fun aSentenceSaidTwiceStaysPut() {
+        val ix = withReference
+        val words = ix.tokens.map { it.norm }
+        val t = SpeechTracker(ix)
+        read(t, words, 0, 120)
+        read(t, words, 110, 120) { assertTrue("went back to $it", it >= 118) }
+        read(t, words, 120, 128)
+        assertTrue("lost at ${t.state.position}", kotlin.math.abs(t.state.position - 128) <= 3)
     }
 
     @Test fun manualPositionIsHonouredAndOldSessionWordsAreIgnored() {

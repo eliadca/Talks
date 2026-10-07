@@ -96,7 +96,7 @@ class TrackerSimulationTest {
     }
 
     @Test fun recoversAfterSkipsAndRepeats() {
-        val s = runMany(SampleScripts.practice, SimConfig(skipPerSentence = 0.08, backPerSentence = 0.06), seeds = 25)
+        val s = runMany(SampleScripts.practice, SimConfig(skipPerSentence = 0.08, backPerSentence = 0.06), seeds = 25, tracker = TrackerConfig(followBack = true))
         report("skips and repeats", s)
         val rec = s.flatMap { it.recoveries }.sorted()
         val unrec = s.sumOf { it.unrecovered }
@@ -118,6 +118,7 @@ class TrackerSimulationTest {
             SampleScripts.refrains,
             SimConfig(digressionPerSentence = 0.06, skipPerSentence = 0.04, backPerSentence = 0.04),
             seeds = 30,
+            tracker = TrackerConfig(followBack = true),
         )
         report("refrains + improvisation/jumps", s)
         assertTrue("accuracy ${accuracy(s)}", accuracy(s) > 0.80)
@@ -152,5 +153,49 @@ class TrackerSimulationTest {
         println("large script: %d tokens, %d hypotheses, %.1f ms total, %.2f ms/hypothesis, %s".format(index.size, run.events.size, ms, ms / run.events.size, sc))
         assertTrue("accuracy ${sc.accuracy}", sc.accuracy > 0.93)
         assertTrue("slow: ${ms / run.events.size} ms per hypothesis", ms / run.events.size < 25.0)
+    }
+
+    @Test fun whatWasReadStaysReadWhateverIsSaidAgain() {
+        // Speakers going back over sentences already read, on scripts with and without refrains:
+        // by default the marker never goes back more than a revised word or two.
+        var backs = 0
+        var events = 0
+        for (index in listOf(SampleScripts.practice, SampleScripts.refrains)) {
+            for (seed in 1..15) {
+                val run = Simulator.generate(index, SimConfig(backPerSentence = 0.08, digressionPerSentence = 0.04), Random(seed))
+                val t = SpeechTracker(index)
+                // Which script words the speaker has really read (the truth moving on word by word).
+                val spoken = BooleanArray(index.size + 1)
+                var lastTruth = 0
+                var prev = 0
+                for (e in run.events) {
+                    val p = t.onHypothesis(e.text, e.isFinal).position
+                    events++
+                    if (e.truth - lastTruth in 1..3) for (q in lastTruth until e.truth) spoken[q] = true
+                    lastTruth = e.truth
+                    // Back into text that was read: never.
+                    if (p < prev - 2 && (p until prev - 2).all { spoken[it] }) { backs++; println("BAD prev=$prev p=$p") }
+                    prev = p
+                }
+            }
+        }
+        println("never back: $backs of $events updates went back")
+        assertTrue("went back $backs times", backs == 0)
+    }
+
+    @Test fun repeatedParagraphsAreReadInOrder() {
+        // The script itself says a sentence twice in a row and a paragraph again later.
+        val sentence = "Dios cumple siempre lo que promete."
+        val paragraph = "Las cosas primeras ya han venido, y yo anuncio cosas nuevas. Antes de que broten se las hago oír."
+        val other = SampleScripts.practice.tokens.take(60).joinToString(" ") { it.norm }
+        val index = ScriptIndex.build("$other. $sentence $sentence $paragraph\n\n$other. $paragraph $sentence")
+        for (seed in 1..20) {
+            val run = Simulator.generate(index, SimConfig(), Random(seed))
+            val t = SpeechTracker(index)
+            for (e in run.events) {
+                val p = t.onHypothesis(e.text, e.isFinal).position
+                if (e.graded) assertTrue("seed $seed: at $p, speaker at ${e.truth}", p - e.truth in -6..4)
+            }
+        }
     }
 }
