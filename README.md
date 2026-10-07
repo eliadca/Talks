@@ -13,6 +13,8 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 - **Sigue tu voz en español** y marca en pantalla **la frase que estás diciendo, entera y quieta**: no se mueve bajo tus ojos mientras la lees y solo
   salta a la siguiente cuando la terminas (subrayado + resaltado suave + flecha en el margen). Lo ya dicho se atenúa y el texto sube solo, línea a línea,
   manteniendo la línea actual a una altura fija con varias líneas por delante. **Las notas `[entre corchetes]` y los títulos nunca se marcan.**
+  **También llega hasta la última línea**, a la misma altura de lectura, incluso al girar la tablet o cambiar el tamaño de letra.
+  Al terminar, mantiene en pantalla la última línea hablada en vez de saltar a notas o líneas vacías posteriores.
 - **Botón «Marcado»** (en la barra de controles y en Ajustes): elige **Frase** (recomendado), **Oración** (bloques más largos), **Palabra a palabra**
   o **Sin marcar** (solo una línea de lectura), y **Atrasar / Adelantar** el marcado hasta 3 palabras respecto a tu voz para ajustarlo a tu ritmo.
 - **No se adelanta a tu voz**: una palabra suelta al final de una línea («eh», «este», una «y» de respiración) ya no hace saltar la primera palabra de la siguiente.
@@ -53,7 +55,12 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 - **Menú lateral plegado** en una barra estrecha (nuevo discurso, Todos, Fijados, Carpetas, Papelera y **Ajustes**). El menú completo se abre con el botón ☰
   y **nunca se abre al deslizar**, así que moverte por un discurso no lo despliega por accidente.
 - Lista y editor lado a lado en horizontal; en vertical se turnan (lista → discurso → volver). Compatible con multiventana y DeX.
-- Carpetas con color, fijados, etiquetas de color, orden por modificación/creación/título/duración, búsqueda en todos los discursos, papelera (30 días con deshacer).
+- **Carpetas en el panel de la biblioteca**, como en Drive: pulsa «Carpetas» en el menú lateral para verlas en el mismo espacio que la lista de discursos.
+  Entra en una carpeta con un toque y vuelve con «← Carpetas» o el botón Atrás. Busca carpetas por nombre, créalas y cambia su nombre o color desde ⋮.
+  **Mover a carpeta** está en el ⋮ de cada discurso de la lista (también al mantenerlo pulsado) y en el editor: elige el destino y pulsa «Mover».
+  Puedes moverlo entre carpetas o a «Sin carpeta», con **Deshacer**. Las notas nuevas o importadas dentro de una carpeta se guardan en ella;
+  eliminar una carpeta conserva sus discursos en «Sin carpeta».
+- Fijados, etiquetas de color, orden por modificación/creación/título/duración, búsqueda de discursos dentro de la vista abierta, papelera (30 días con deshacer).
 - Tiempo estimado de cada discurso a tu ritmo real y **tiempo objetivo** con aviso si te pasas.
 - **Historial de versiones** automático (cada 10 min de edición) y versiones con nombre que nunca se borran; restaurar guarda antes el texto actual.
 - **Importar** (botón de la lista y del menú): varios archivos `.md`, `.txt` o `.docx` a la vez (Word: títulos, negritas, listas…), o

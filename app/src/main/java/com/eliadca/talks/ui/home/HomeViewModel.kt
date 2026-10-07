@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -42,6 +43,7 @@ enum class SortKey(val label: String) {
 sealed interface LibraryFilter {
     data object All : LibraryFilter
     data object Pinned : LibraryFilter
+    data object Folders : LibraryFilter
     data object NoFolder : LibraryFilter
     data class Folder(val id: Long) : LibraryFilter
     data object Trash : LibraryFilter
@@ -81,7 +83,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val messages = Channel<UiMessage>(Channel.BUFFERED)
     val messageFlow: Flow<UiMessage> = messages.receiveAsFlow()
 
-    private val activeSpeeches: Flow<List<SpeechListItem>> = _query
+    private val activeSpeeches: Flow<List<SpeechListItem>> = combine(_query, _filter) { query, filter ->
+        // Searching folder names should not also scan the bodies of all speeches.
+        if (filter == LibraryFilter.Folders) "" else query
+    }
+        .distinctUntilChanged()
         .debounce(150)
         .flatMapLatest { q -> if (q.isBlank()) repo.observeActive() else repo.search(q) }
 
@@ -125,6 +131,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private fun matches(item: SpeechListItem, filter: LibraryFilter): Boolean = when (filter) {
         LibraryFilter.All -> true
         LibraryFilter.Pinned -> item.pinned
+        LibraryFilter.Folders -> false
         LibraryFilter.NoFolder -> item.folderId == null
         is LibraryFilter.Folder -> item.folderId == filter.id
         LibraryFilter.Trash -> false
@@ -144,6 +151,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     // --- navigation state ---------------------------------------------------------------------
 
     fun setFilter(f: LibraryFilter) {
+        if (_filter.value != f) _query.value = ""
         _filter.value = f
     }
 
@@ -165,6 +173,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val folder = (filter.value as? LibraryFilter.Folder)?.id
             if (filter.value == LibraryFilter.Trash) _filter.value = LibraryFilter.All
+            if (filter.value == LibraryFilter.Folders) _filter.value = LibraryFilter.NoFolder
             val id = repo.create(folderId = folder)
             _query.value = ""
             _selectedId.value = id
@@ -249,6 +258,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** Makes sure [id] is listed (not hidden by the trash, the pinned filter or a search) and opens it. */
     private fun showNew(id: Long) {
         if (_filter.value == LibraryFilter.Trash || _filter.value == LibraryFilter.Pinned) _filter.value = LibraryFilter.All
+        if (_filter.value == LibraryFilter.Folders) _filter.value = LibraryFilter.NoFolder
         _query.value = ""
         _selectedId.value = id
     }
@@ -298,7 +308,27 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun moveToFolder(id: Long, folderId: Long?) {
-        viewModelScope.launch { repo.setFolder(id, folderId) }
+        viewModelScope.launch {
+            val speech = repo.observeItem(id).first() ?: return@launch
+            if (speech.folderId == folderId) return@launch
+            val destination = repo.observeFolders().first().firstOrNull { it.id == folderId }
+            if (folderId != null && destination == null) {
+                messages.trySend(UiMessage("La carpeta ya no existe. Elige otra carpeta."))
+                return@launch
+            }
+            repo.setFolder(id, folderId)
+            messages.trySend(
+                UiMessage("Movido a «${destination?.name ?: "Sin carpeta"}»", "Deshacer") {
+                    viewModelScope.launch {
+                        // If the old folder was deleted meanwhile, keep the note without a folder.
+                        val oldFolder = speech.folderId?.takeIf { previous ->
+                            repo.observeFolders().first().any { it.id == previous }
+                        }
+                        repo.setFolder(id, oldFolder)
+                    }
+                },
+            )
+        }
     }
 
     fun setLabel(id: Long, color: Int) {
@@ -333,7 +363,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun createFolder(name: String, color: Int) {
         viewModelScope.launch {
             val id = repo.createFolder(name, color)
-            _filter.value = LibraryFilter.Folder(id)
+            setFilter(LibraryFilter.Folder(id))
         }
     }
 
@@ -343,7 +373,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteFolder(id: Long) {
         viewModelScope.launch {
-            if ((_filter.value as? LibraryFilter.Folder)?.id == id) _filter.value = LibraryFilter.All
+            if ((_filter.value as? LibraryFilter.Folder)?.id == id) setFilter(LibraryFilter.Folders)
             repo.deleteFolder(id)
             messages.trySend(UiMessage("Carpeta eliminada. Sus discursos se conservan."))
         }

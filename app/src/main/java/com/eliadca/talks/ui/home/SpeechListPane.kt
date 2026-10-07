@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -39,6 +40,8 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
@@ -50,6 +53,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,6 +89,8 @@ fun SpeechListPane(
     onTogglePin: (SpeechListItem) -> Unit,
     onDuplicate: (Long) -> Unit,
     onTrash: (SpeechListItem) -> Unit,
+    onMove: (SpeechListItem) -> Unit,
+    onBackToFolders: () -> Unit,
     onRestore: (Long) -> Unit,
     onDeleteForever: (SpeechListItem) -> Unit,
     onEmptyTrash: () -> Unit,
@@ -97,6 +103,13 @@ fun SpeechListPane(
     var importMenu by remember { mutableStateOf(false) }
 
     Column(modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+        if (filter.isFolderLocation) {
+            TextButton(onClick = onBackToFolders, modifier = Modifier.padding(start = 8.dp, top = 4.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver a carpetas", Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Carpetas")
+            }
+        }
         Row(
             Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -151,7 +164,13 @@ fun SpeechListPane(
                 onValueChange = onQuery,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                 singleLine = true,
-                placeholder = { Text("Buscar en todos los discursos") },
+                placeholder = {
+                    Text(when (filter) {
+                        is LibraryFilter.Folder, LibraryFilter.NoFolder -> "Buscar en esta carpeta"
+                        LibraryFilter.Pinned -> "Buscar en fijados"
+                        else -> "Buscar en todos los discursos"
+                    })
+                },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -195,25 +214,29 @@ fun SpeechListPane(
                 }
             }
         } else {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(items, key = { it.id }) { item ->
-                    SpeechCard(
-                        item = item,
-                        folder = item.folderId?.let { folderById[it] },
-                        selected = item.id == selectedId,
-                        paceWpm = paceWpm,
-                        isTrash = isTrash,
-                        onClick = { if (!isTrash) onSelect(item.id) },
-                        onTogglePin = { onTogglePin(item) },
-                        onDuplicate = { onDuplicate(item.id) },
-                        onTrash = { onTrash(item) },
-                        onRestore = { onRestore(item.id) },
-                        onDeleteForever = { onDeleteForever(item) },
-                    )
+            key(filter) {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(items, key = { it.id }) { item ->
+                        SpeechCard(
+                            item = item,
+                            folder = item.folderId?.let { folderById[it] },
+                            selected = item.id == selectedId,
+                            paceWpm = paceWpm,
+                            isTrash = isTrash,
+                            onClick = { if (!isTrash) onSelect(item.id) },
+                            onTogglePin = { onTogglePin(item) },
+                            onDuplicate = { onDuplicate(item.id) },
+                            onTrash = { onTrash(item) },
+                            onMove = { onMove(item) },
+                            onRestore = { onRestore(item.id) },
+                            onDeleteForever = { onDeleteForever(item) },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
                 }
             }
         }
@@ -248,6 +271,7 @@ private fun MetaChip(icon: androidx.compose.ui.graphics.vector.ImageVector?, tex
 private fun titleFor(filter: LibraryFilter, folders: Map<Long, FolderEntity>): String = when (filter) {
     LibraryFilter.All -> "Discursos"
     LibraryFilter.Pinned -> "Fijados"
+    LibraryFilter.Folders -> "Carpetas"
     LibraryFilter.NoFolder -> "Sin carpeta"
     is LibraryFilter.Folder -> folders[filter.id]?.name ?: "Carpeta"
     LibraryFilter.Trash -> "Papelera"
@@ -264,15 +288,17 @@ private fun SpeechCard(
     onTogglePin: () -> Unit,
     onDuplicate: () -> Unit,
     onTrash: () -> Unit,
+    onMove: () -> Unit,
     onRestore: () -> Unit,
     onDeleteForever: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
     var menu by remember { mutableStateOf(false) }
     val seconds = if (paceWpm > 0) item.wordCount * 60 / paceWpm else 0
     val shape = RoundedCornerShape(18.dp)
 
-    Box {
+    Box(modifier) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -303,6 +329,9 @@ private fun SpeechCard(
                     if (item.pinned) {
                         Spacer(Modifier.width(6.dp))
                         Icon(Icons.Filled.PushPin, contentDescription = "Fijado", tint = colors.primary, modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Filled.MoreVert, "Opciones de discurso: ${item.title.ifBlank { "Sin título" }}")
                     }
                 }
                 if (item.preview.isNotBlank()) {
@@ -350,6 +379,11 @@ private fun SpeechCard(
                     onClick = { menu = false; onDeleteForever() },
                 )
             } else {
+                DropdownMenuItem(
+                    text = { Text("Mover a carpeta") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null) },
+                    onClick = { menu = false; onMove() },
+                )
                 DropdownMenuItem(
                     text = { Text(if (item.pinned) "Quitar de fijados" else "Fijar arriba") },
                     leadingIcon = { Icon(Icons.Filled.PushPin, null) },

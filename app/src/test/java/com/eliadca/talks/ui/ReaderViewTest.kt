@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.os.Looper
+import android.util.TypedValue
 import android.view.View
 import androidx.test.core.app.ApplicationProvider
 import com.eliadca.talks.core.doc.Markup
@@ -59,6 +60,84 @@ class ReaderViewTest {
         // Drawing the highlighted state must work too.
         val bmp = Bitmap.createBitmap(r.width, r.height, Bitmap.Config.ARGB_8888)
         r.draw(Canvas(bmp))
+    }
+
+    @Test fun theLastLineReachesTheReadingHeightOnTheFirstLayout() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val doc = Markup.parse((1..80).joinToString("\n") { "Línea $it." } + "\nFin.")
+        val last = doc.text.lastIndexOf("Fin.")
+        for ((width, height) in listOf(1600 to 900, 900 to 1600, 720 to 480)) {
+            for (font in listOf(24f, 60f, 140f)) {
+                for (anchor in listOf(0.15f, 0.35f, 0.7f)) {
+                    val r = ReaderView(ctx).apply {
+                        setDocument(doc)
+                        configure(ReaderConfig(font, 1.35f, false, ReaderPalette.of(ReaderTheme.NIGHT), anchor, true))
+                        measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+                        layout(0, 0, width, height)
+                    }
+                    r.setProgress(last, last, doc.text.length, jump = true)
+                    assertEquals("last line at reading height: ${width}x$height, font=$font, anchor=$anchor", last, r.readingLineOffset())
+                    assertTrue("programmatic scrolling keeps following", r.autoFollow)
+                }
+            }
+        }
+    }
+
+    @Test fun theLastLineRemainsReachableAfterRotatingAndChangingTheFont() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val doc = Markup.parse((1..60).joinToString("\n") { "Otra línea $it." } + "\nFin.")
+        val last = doc.text.lastIndexOf("Fin.")
+        val r = ReaderView(ctx).apply { setDocument(doc) }
+        for ((width, height, font) in listOf(Triple(1600, 900, 40f), Triple(900, 1600, 40f), Triple(900, 1600, 100f), Triple(1600, 900, 24f))) {
+            r.configure(ReaderConfig(font, 1.35f, false, ReaderPalette.of(ReaderTheme.NIGHT), 0.35f, true))
+            r.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+            r.layout(0, 0, width, height)
+            r.setProgress(last, last, doc.text.length, jump = true)
+            assertEquals("last line after relayout ${width}x$height, font=$font", last, r.readingLineOffset())
+            assertTrue("relayout does not suspend following", r.autoFollow)
+        }
+    }
+
+    @Test fun theFinalUnderlineStaysAtTheSameScreenHeightAndManualScrollingCanReachIt() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val doc = Markup.parse((1..80).joinToString("\n") { "Fin." })
+        val last = doc.text.lastIndexOf("Fin.")
+        val palette = ReaderPalette.of(ReaderTheme.NIGHT)
+        val r = ReaderView(ctx).apply {
+            setDocument(doc)
+            configure(ReaderConfig(40f, 1.35f, false, palette, 0.35f, true))
+            measure(View.MeasureSpec.makeMeasureSpec(1600, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(900, View.MeasureSpec.EXACTLY))
+            layout(0, 0, 1600, 900)
+        }
+        val fontPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 40f, ctx.resources.displayMetrics)
+        fun underlineRows(): List<Int> {
+            val bitmap = Bitmap.createBitmap(r.width, r.height, Bitmap.Config.ARGB_8888)
+            // The framework supplies a canvas in the ScrollView's scrolled coordinates.
+            val canvas = Canvas(bitmap).apply { translate(0f, -r.scrollY.toFloat()) }
+            r.draw(canvas)
+            // To the right of the margin arrow, only the underline uses the solid accent colour.
+            val rows = (0 until r.height).filter { y ->
+                ((fontPx * 0.75f).toInt() until (fontPx * 4f).toInt()).any { x ->
+                    val color = bitmap.getPixel(x, y)
+                    kotlin.math.abs(Color.red(color) - Color.red(palette.accent)) <= 6 &&
+                        kotlin.math.abs(Color.green(color) - Color.green(palette.accent)) <= 6 &&
+                        kotlin.math.abs(Color.blue(color) - Color.blue(palette.accent)) <= 6
+                }
+            }
+            bitmap.recycle()
+            assertTrue("the marked line is drawn on screen", rows.isNotEmpty())
+            return rows
+        }
+        r.setProgress(0, 0, 3, jump = true)
+        val firstRows = underlineRows()
+        r.setProgress(last, last, last + 3)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertEquals("automatic scrolling reaches the final line", last, r.readingLineOffset())
+        assertEquals("the last underline keeps exactly the same height", firstRows, underlineRows())
+
+        r.setManualMode(true)
+        r.scrollTo(0, Int.MAX_VALUE)
+        assertEquals("manual scrolling reaches the end too", last, r.readingLineOffset())
     }
 
     @Test fun progressReportedFromABackgroundThreadDoesNotCrash() {
@@ -139,13 +218,8 @@ class ReaderViewTest {
             val r = ReaderView(ctx).apply {
                 setDocument(doc)
                 configure(ReaderConfig(40f, 1.35f, false, palette, 0.35f, true, guide = guide))
-                // Twice, like a real screen: the room above the text depends on the reader's own
-                // height, which it only knows after the first layout (it then asks for another).
-                repeat(2) {
-                    requestLayout()
-                    measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
-                    layout(0, 0, 1200, 800)
-                }
+                measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
+                layout(0, 0, 1200, 800)
             }
             r.setProgress(0, 0, marks, jump = true)
             val bmp = Bitmap.createBitmap(1200, 800, Bitmap.Config.ARGB_8888)

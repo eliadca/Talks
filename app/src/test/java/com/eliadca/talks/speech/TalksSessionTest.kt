@@ -1,6 +1,7 @@
 package com.eliadca.talks.speech
 
 import com.eliadca.talks.core.sample.SampleContent
+import com.eliadca.talks.core.doc.Markup
 import com.eliadca.talks.core.track.MarkUnit
 import com.eliadca.talks.core.track.Marking
 import com.eliadca.talks.core.track.ScriptIndex
@@ -208,6 +209,22 @@ class TalksSessionTest {
         engine.hear(lastWords, final = true)
         waitFor("finished") { session.state.value.finished }
         assertEquals(1f, session.state.value.progress, 0.001f)
+        assertEquals("the last spoken line stays in place", index.tokens.last().start, session.state.value.focus)
+    }
+
+    @Test fun finishingKeepsTheLastSpokenLineInsteadOfScrollingIntoTrailingNotes() {
+        val doc = Markup.parse("Gracias por acompañarnos y por compartir este tiempo con nosotros.\n[Apagar el micrófono.]\n# Fin\n\n")
+        index = ScriptIndex.build(doc.text, doc.silentRanges(readHeadings = false))
+        session = TalksSession(scope, index, engine, now = { System.nanoTime() / 1_000_000 })
+        session.start(index.size - 6)
+        waitFor("start near the end") { session.state.value.position == index.size - 6 }
+        engine.hear(index.tokens.takeLast(6).joinToString(" ") { it.norm }, final = true)
+        waitFor("finished") { session.state.value.finished }
+        val state = session.state.value
+        assertEquals(index.tokens.last().start, state.focus)
+        assertTrue("the focus remains before the trailing note", state.focus < doc.text.indexOf('['))
+        assertTrue("nothing remains to be marked", state.marks.isEmpty())
+        assertEquals(1f, state.progress, 0.001f)
     }
 
     @Test fun automaticAdvanceMovesTheTextOnItsOwnAndStopsListening() {

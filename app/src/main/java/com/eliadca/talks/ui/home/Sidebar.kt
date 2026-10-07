@@ -1,14 +1,12 @@
 package com.eliadca.talks.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -17,31 +15,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -67,31 +54,17 @@ import com.eliadca.talks.ui.theme.LabelColors
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.FileDownload
 
-/**
- * The menu folded into a slim rail of floating buttons on the screen's own background: new speech,
- * the main lists, folders, trash and settings. "Carpetas" opens the folders right inside the rail;
- * picking one shows what it holds. Nothing here reacts to swipes.
- */
+/** A fixed-width rail. Folders use the same library pane as speeches. */
 @Composable
 fun LibraryRail(
     filter: LibraryFilter,
     counts: LibraryCounts,
-    folders: List<FolderEntity>,
-    foldersOpen: Boolean,
-    onToggleFolders: () -> Unit,
     onNewSpeech: () -> Unit,
     onFilter: (LibraryFilter) -> Unit,
-    onNewFolder: (String, Int) -> Unit,
-    onUpdateFolder: (FolderEntity) -> Unit,
-    onDeleteFolder: (Long) -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
-    var folderDialog by remember { mutableStateOf<FolderEntity?>(null) }
-    var newFolder by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf<FolderEntity?>(null) }
-
     Column(
         modifier
             .background(colors.background)
@@ -100,7 +73,6 @@ fun LibraryRail(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // New speech: the one strong colour of the rail.
         androidx.compose.material3.Surface(
             onClick = onNewSpeech,
             shape = RoundedCornerShape(20.dp),
@@ -114,65 +86,14 @@ fun LibraryRail(
         Spacer(Modifier.height(6.dp))
         RailButton(Icons.Filled.Description, "Todos", filter == LibraryFilter.All) { onFilter(LibraryFilter.All) }
         RailButton(Icons.Filled.PushPin, "Fijados", filter == LibraryFilter.Pinned) { onFilter(LibraryFilter.Pinned) }
-        RailButton(
-            if (foldersOpen) Icons.Filled.FolderOpen else Icons.Filled.Folder, "Carpetas",
-            foldersOpen || filter is LibraryFilter.Folder || filter == LibraryFilter.NoFolder,
-            onClick = onToggleFolders,
-        )
-        AnimatedVisibility(foldersOpen) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(colors.surfaceContainer)
-                    .padding(6.dp),
-            ) {
-                NavRow(Icons.Filled.FolderOpen, "Sin carpeta", counts.noFolder, filter == LibraryFilter.NoFolder) { onFilter(LibraryFilter.NoFolder) }
-                for (f in folders) {
-                    var menu by remember { mutableStateOf(false) }
-                    Box {
-                        NavRow(
-                            Icons.Filled.Folder, f.name, counts.perFolder[f.id] ?: 0,
-                            filter == LibraryFilter.Folder(f.id), tint = Color(f.color),
-                            onLongClick = { menu = true },
-                        ) { onFilter(LibraryFilter.Folder(f.id)) }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Cambiar nombre y color") },
-                                leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                                onClick = { menu = false; folderDialog = f },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Eliminar carpeta") },
-                                leadingIcon = { Icon(Icons.Filled.Delete, null) },
-                                onClick = { menu = false; confirmDelete = f },
-                            )
-                        }
-                    }
-                }
-                NavRow(Icons.Filled.CreateNewFolder, "Nueva carpeta", null, false, tint = colors.primary) { newFolder = true }
-            }
-        }
+        RailButton(Icons.Filled.Folder, "Carpetas", filter.isFolderLocation) { onFilter(LibraryFilter.Folders) }
         RailButton(Icons.Filled.Delete, "Papelera", filter == LibraryFilter.Trash, badge = counts.trash) { onFilter(LibraryFilter.Trash) }
         RailButton(Icons.Filled.Settings, "Ajustes", false, onClick = onSettings)
     }
-
-    if (newFolder) {
-        FolderDialog(null, onSave = { name, color -> onNewFolder(name, color); newFolder = false }, onDismiss = { newFolder = false })
-    }
-    folderDialog?.let { f ->
-        FolderDialog(f, onSave = { name, color -> onUpdateFolder(f.copy(name = name, color = color)); folderDialog = null }, onDismiss = { folderDialog = null })
-    }
-    confirmDelete?.let { f ->
-        AlertDialog(
-            onDismissRequest = { confirmDelete = null },
-            title = { Text("¿Eliminar la carpeta «${f.name}»?") },
-            text = { Text("Los discursos que contiene no se borran: pasan a «Sin carpeta».") },
-            confirmButton = { TextButton(onClick = { onDeleteFolder(f.id); confirmDelete = null }) { Text("Eliminar") } },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancelar") } },
-        )
-    }
 }
+
+internal val LibraryFilter.isFolderLocation: Boolean
+    get() = this == LibraryFilter.Folders || this == LibraryFilter.NoFolder || this is LibraryFilter.Folder
 
 /** A floating button of the rail: a soft raised tile with its label under it. */
 @Composable
@@ -211,26 +132,19 @@ private fun RailButton(icon: ImageVector, label: String, selected: Boolean, badg
     }
 }
 
-/** The full menu: lists, folders, trash and settings. Opens over the screen from the rail. */
+/** The full menu opens over the screen and navigates to the library panes. */
 @Composable
 fun SidebarContent(
     filter: LibraryFilter,
     counts: LibraryCounts,
-    folders: List<FolderEntity>,
     onFilter: (LibraryFilter) -> Unit,
     onNewSpeech: () -> Unit,
-    onNewFolder: (String, Int) -> Unit,
-    onUpdateFolder: (FolderEntity) -> Unit,
-    onDeleteFolder: (Long) -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
     importActions: ImportActions? = null,
 ) {
-    var folderDialog by remember { mutableStateOf<FolderEntity?>(null) }
     var importMenu by remember { mutableStateOf(false) }
-    var newFolder by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf<FolderEntity?>(null) }
 
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 16.dp)) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -267,52 +181,7 @@ fun SidebarContent(
 
         NavRow(Icons.Filled.Description, "Todos los discursos", counts.all, filter == LibraryFilter.All) { onFilter(LibraryFilter.All) }
         NavRow(Icons.Filled.PushPin, "Fijados", counts.pinned, filter == LibraryFilter.Pinned) { onFilter(LibraryFilter.Pinned) }
-        NavRow(Icons.Filled.FolderOpen, "Sin carpeta", counts.noFolder, filter == LibraryFilter.NoFolder) { onFilter(LibraryFilter.NoFolder) }
-
-        Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "CARPETAS",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = { newFolder = true }) {
-                Icon(Icons.Filled.CreateNewFolder, null, Modifier.size(18.dp))
-                Spacer(Modifier.size(4.dp))
-                Text("Nueva")
-            }
-        }
-        if (folders.isEmpty()) {
-            Text(
-                "Crea carpetas para agrupar tus discursos por evento o tema.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-            )
-        }
-        for (f in folders) {
-            var menu by remember { mutableStateOf(false) }
-            Box {
-                NavRow(
-                    Icons.Filled.Folder, f.name, counts.perFolder[f.id] ?: 0,
-                    filter == LibraryFilter.Folder(f.id), tint = Color(f.color),
-                    onLongClick = { menu = true },
-                ) { onFilter(LibraryFilter.Folder(f.id)) }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Cambiar nombre y color") },
-                        leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                        onClick = { menu = false; folderDialog = f },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Eliminar carpeta") },
-                        leadingIcon = { Icon(Icons.Filled.Delete, null) },
-                        onClick = { menu = false; confirmDelete = f },
-                    )
-                }
-            }
-        }
+        NavRow(Icons.Filled.Folder, "Carpetas", null, filter.isFolderLocation) { onFilter(LibraryFilter.Folders) }
 
         Spacer(Modifier.height(8.dp))
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -320,21 +189,6 @@ fun SidebarContent(
         NavRow(Icons.Filled.Settings, "Ajustes", null, false) { onSettings() }
     }
 
-    if (newFolder) {
-        FolderDialog(null, onSave = { name, color -> onNewFolder(name, color); newFolder = false }, onDismiss = { newFolder = false })
-    }
-    folderDialog?.let { f ->
-        FolderDialog(f, onSave = { name, color -> onUpdateFolder(f.copy(name = name, color = color)); folderDialog = null }, onDismiss = { folderDialog = null })
-    }
-    confirmDelete?.let { f ->
-        AlertDialog(
-            onDismissRequest = { confirmDelete = null },
-            title = { Text("¿Eliminar la carpeta «${f.name}»?") },
-            text = { Text("Los discursos que contiene no se borran: pasan a «Sin carpeta».") },
-            confirmButton = { TextButton(onClick = { onDeleteFolder(f.id); confirmDelete = null }) { Text("Eliminar") } },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancelar") } },
-        )
-    }
 }
 
 @Composable

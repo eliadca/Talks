@@ -89,6 +89,10 @@ class ReaderView(context: Context) : ScrollView(context) {
     private var animator: ValueAnimator? = null
     private var programmaticScroll = false
 
+    /** Known during measurement, before View.height has been set by the first layout. */
+    private var viewportHeight = 0
+    private var alignAfterLayout = true
+
     private var doc: RichDoc = RichDoc.EMPTY
     private var cfg = ReaderConfig(44f, 1.35f, false, ReaderPalette.of(ReaderTheme.NIGHT), 0.35f, true)
 
@@ -166,7 +170,6 @@ class ReaderView(context: Context) : ScrollView(context) {
         content.rebuild(forceLayout = relayout)
         // The reading line is drawn by this view itself.
         invalidate()
-        if (relayout) post { scrollToOffset(focus, animated = false) }
     }
 
     /**
@@ -248,7 +251,7 @@ class ReaderView(context: Context) : ScrollView(context) {
         if (animated && running && abs(target - animTarget) < tolerance) return
         animator?.cancel()
         val delta = target - scrollY
-        if (abs(delta) < tolerance) return
+        if (delta == 0 || (animated && abs(delta) < tolerance)) return
         if (!animated) {
             programmaticScroll = true
             scrollTo(0, target)
@@ -284,10 +287,31 @@ class ReaderView(context: Context) : ScrollView(context) {
         }
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        content.rebuild(forceLayout = true)
-        post { scrollToOffset(focus, animated = false) }
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val viewport = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED) 0
+            else MeasureSpec.getSize(heightMeasureSpec)
+        if (viewport != viewportHeight) {
+            viewportHeight = viewport
+            // ScrollView gives its child the same unbounded height spec even after rotation.
+            // Invalidate that measurement so the spacer reflects the new viewport immediately.
+            content.forceLayout()
+            alignAfterLayout = true
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val wasProgrammatic = programmaticScroll
+        programmaticScroll = true
+        try {
+            // ScrollView may clamp its position when the content shrinks; that is not a gesture.
+            super.onLayout(changed, l, t, r, b)
+        } finally {
+            programmaticScroll = wasProgrammatic
+        }
+        // Align only after the text and its trailing spacer have their final geometry.
+        if (autoFollow && (changed || alignAfterLayout)) scrollToOffset(focus, animated = false)
+        alignAfterLayout = false
     }
 
     override fun onDetachedFromWindow() {
@@ -341,8 +365,9 @@ class ReaderView(context: Context) : ScrollView(context) {
         private var style = EditorStyle(1f, 0, 0)
         private var text: Spanned = SpannableCodec.toSpannable(RichDoc.EMPTY, style, withMarker = false)
 
-        val padTop: Int get() = (this@ReaderView.height * cfg.anchor).toInt()
-        private val padBottom: Int get() = (this@ReaderView.height * (1f - cfg.anchor)).toInt()
+        val padTop: Int get() = (viewportHeight * cfg.anchor).toInt()
+        // Enough room below the last line to bring it all the way up to the reading height.
+        private val padBottom: Int get() = viewportHeight - padTop
 
         /** The left margin holds the arrow that points at the next words; the right one is just a breath. */
         private val sideMargin: Float get() = max(minMargin, fontPx() * 0.72f)
@@ -384,7 +409,10 @@ class ReaderView(context: Context) : ScrollView(context) {
             paint.textSize = fontPx()
             paint.textLocale = SPANISH
             paint.typeface = if (cfg.serif) Typeface.SERIF else Typeface.SANS_SERIF
-            if (forceLayout) builtWidth = -1
+            if (forceLayout) {
+                builtWidth = -1
+                alignAfterLayout = true
+            }
             requestLayout()
             invalidate()
         }

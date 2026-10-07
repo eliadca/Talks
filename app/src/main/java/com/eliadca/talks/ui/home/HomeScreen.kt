@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
@@ -57,6 +58,7 @@ import com.eliadca.talks.export.Clipboard
 import com.eliadca.talks.ui.components.EmptyState
 import com.eliadca.talks.ui.editor.EditorPane
 import com.eliadca.talks.ui.editor.EditorViewModel
+import com.eliadca.talks.ui.editor.MoveToFolderDialog
 import kotlinx.coroutines.launch
 
 /**
@@ -90,10 +92,9 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     var confirmDelete by remember { mutableStateOf<SpeechListItem?>(null) }
+    var movingSpeech by remember { mutableStateOf<SpeechListItem?>(null) }
     /** Writing with the whole screen: the list of speeches is folded away. */
     var focusMode by rememberSaveable { mutableStateOf(false) }
-    /** The folders shown inside the rail. */
-    var foldersOpen by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(selectedId) { editor.open(selectedId) }
     LaunchedEffect(Unit) {
@@ -140,34 +141,65 @@ fun HomeScreen(
     ) {
         val showRail = maxWidth >= RAIL_MIN_WIDTH
         val listWidth = if (maxWidth >= 1200.dp) 360.dp else 330.dp
-        val railWidth = if (!showRail) 0.dp else if (foldersOpen) RAIL_OPEN_WIDTH else RAIL_WIDTH
+        val railWidth = if (showRail) RAIL_WIDTH else 0.dp
         val twoPane = maxWidth - railWidth - listWidth >= MIN_EDITOR_WIDTH
+        val navigate: (LibraryFilter) -> Unit = { destination ->
+            home.setFilter(destination)
+            focusMode = false
+            // In a narrow window, navigation must actually reveal the library.
+            if (!twoPane) home.select(null)
+        }
+
+        BackHandler(
+            enabled = filter.isFolderLocation && filter != LibraryFilter.Folders &&
+                (selectedId == null || (twoPane && !focusMode)) && drawerState.isClosed,
+        ) { navigate(LibraryFilter.Folders) }
 
         val list: @Composable (Modifier) -> Unit = { mod ->
-            SpeechListPane(
-                items = items,
-                folders = folders,
-                selectedId = selectedId,
-                filter = filter,
-                query = query,
-                sort = sort,
-                paceWpm = pace,
-                showMenuButton = !showRail,
-                onMenu = openMenu,
-                onQuery = home::setQuery,
-                onSort = home::setSort,
-                // A speech opens with the whole screen to write; the list comes back with one tap.
-                onSelect = { id -> home.select(id); focusMode = true },
-                onNew = home::createSpeech,
-                onTogglePin = home::togglePin,
-                onDuplicate = home::duplicate,
-                onTrash = { home.moveToTrash(it.id, it.title) },
-                onRestore = home::restore,
-                onDeleteForever = { confirmDelete = it },
-                onEmptyTrash = { confirmDelete = EMPTY_TRASH_MARKER },
-                importActions = importActions,
-                modifier = mod,
-            )
+            AnimatedContent(filter == LibraryFilter.Folders, modifier = mod, label = "library-pane") { browsingFolders ->
+                if (browsingFolders) {
+                    FolderListPane(
+                        folders = folders,
+                        counts = counts,
+                        query = query,
+                        showMenuButton = !showRail,
+                        onMenu = openMenu,
+                        onQuery = home::setQuery,
+                        onOpen = navigate,
+                        onNewFolder = home::createFolder,
+                        onUpdateFolder = home::updateFolder,
+                        onDeleteFolder = home::deleteFolder,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    SpeechListPane(
+                        items = items,
+                        folders = folders,
+                        selectedId = selectedId,
+                        filter = filter,
+                        query = query,
+                        sort = sort,
+                        paceWpm = pace,
+                        showMenuButton = !showRail,
+                        onMenu = openMenu,
+                        onQuery = home::setQuery,
+                        onSort = home::setSort,
+                        // A speech opens with the whole screen to write; the list comes back with one tap.
+                        onSelect = { id -> home.select(id); focusMode = true },
+                        onNew = home::createSpeech,
+                        onTogglePin = home::togglePin,
+                        onDuplicate = home::duplicate,
+                        onTrash = { home.moveToTrash(it.id, it.title) },
+                        onMove = { movingSpeech = it },
+                        onBackToFolders = { navigate(LibraryFilter.Folders) },
+                        onRestore = home::restore,
+                        onDeleteForever = { confirmDelete = it },
+                        onEmptyTrash = { confirmDelete = EMPTY_TRASH_MARKER },
+                        importActions = importActions,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
         val actions = SpeechActions(
             togglePin = { selectedItem?.let(home::togglePin) },
@@ -231,18 +263,14 @@ fun HomeScreen(
                     SidebarContent(
                         filter = filter,
                         counts = counts,
-                        folders = folders,
                         onFilter = {
-                            home.setFilter(it)
+                            navigate(it)
                             closeMenu()
                         },
                         onNewSpeech = {
                             home.createSpeech()
                             closeMenu()
                         },
-                        onNewFolder = home::createFolder,
-                        onUpdateFolder = home::updateFolder,
-                        onDeleteFolder = home::deleteFolder,
                         onSettings = {
                             closeMenu()
                             onOpenSettings()
@@ -258,19 +286,10 @@ fun HomeScreen(
                     LibraryRail(
                         filter = filter,
                         counts = counts,
-                        folders = folders,
-                        foldersOpen = foldersOpen,
-                        onToggleFolders = { foldersOpen = !foldersOpen },
                         onNewSpeech = home::createSpeech,
-                        onFilter = { f ->
-                            home.setFilter(f)
-                            focusMode = false
-                        },
-                        onNewFolder = home::createFolder,
-                        onUpdateFolder = home::updateFolder,
-                        onDeleteFolder = home::deleteFolder,
+                        onFilter = navigate,
                         onSettings = onOpenSettings,
-                        modifier = Modifier.width(if (foldersOpen) RAIL_OPEN_WIDTH else RAIL_WIDTH).fillMaxHeight(),
+                        modifier = Modifier.width(RAIL_WIDTH).fillMaxHeight(),
                     )
                 }
                 if (twoPane) {
@@ -286,7 +305,7 @@ fun HomeScreen(
                     }
                     editorPane(Modifier.weight(1f).fillMaxHeight(), false)
                 } else {
-                    BackHandler(enabled = selectedId != null) { home.select(null) }
+                    BackHandler(enabled = selectedId != null && drawerState.isClosed) { home.select(null) }
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         if (selectedId == null) list(Modifier.fillMaxSize()) else editorPane(Modifier.fillMaxSize(), true)
                     }
@@ -295,6 +314,15 @@ fun HomeScreen(
         }
 
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+    }
+
+    movingSpeech?.let { speech ->
+        MoveToFolderDialog(
+            folders = folders,
+            current = speech.folderId,
+            onPick = { folder -> home.moveToFolder(speech.id, folder); movingSpeech = null },
+            onDismiss = { movingSpeech = null },
+        )
     }
 
     confirmDelete?.let { target ->
@@ -322,7 +350,6 @@ fun HomeScreen(
 /** From this width on, the menu is a slim rail at the side. */
 private val RAIL_MIN_WIDTH: Dp = 600.dp
 private val RAIL_WIDTH: Dp = 88.dp
-private val RAIL_OPEN_WIDTH: Dp = 236.dp
 
 /** The editor next to the list must be at least this wide; otherwise they take turns. */
 private val MIN_EDITOR_WIDTH: Dp = 520.dp

@@ -183,20 +183,32 @@ fun TargetDialog(current: Int, suggestion: Int, onSet: (Int) -> Unit, onDismiss:
 
 @Composable
 fun MoveToFolderDialog(folders: List<FolderEntity>, current: Long?, onPick: (Long?) -> Unit, onDismiss: () -> Unit) {
+    var destination by remember(current) { mutableStateOf(current) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Mover a carpeta") },
         text = {
-            LazyColumn(Modifier.heightIn(max = 380.dp)) {
-                item {
-                    FolderChoice("Sin carpeta", null, current == null) { onPick(null) }
+            Column {
+                if (folders.isEmpty()) {
+                    Text("Crea una carpeta en «Carpetas» para organizar tus discursos.", modifier = Modifier.padding(bottom = 12.dp))
                 }
-                items(folders, key = { it.id }) { f ->
-                    FolderChoice(f.name, f.color, current == f.id) { onPick(f.id) }
+                LazyColumn(Modifier.heightIn(max = 380.dp)) {
+                    item {
+                        FolderChoice("Sin carpeta", null, destination == null) { destination = null }
+                    }
+                    items(folders, key = { it.id }) { f ->
+                        FolderChoice(f.name, f.color, destination == f.id) { destination = f.id }
+                    }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        confirmButton = {
+            TextButton(
+                onClick = { onPick(destination) },
+                enabled = destination != current && (destination == null || folders.any { it.id == destination }),
+            ) { Text("Mover") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }
 
