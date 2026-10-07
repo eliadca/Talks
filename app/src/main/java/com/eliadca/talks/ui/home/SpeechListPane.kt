@@ -41,7 +41,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
@@ -381,7 +381,7 @@ private fun SpeechCard(
             } else {
                 DropdownMenuItem(
                     text = { Text("Mover a carpeta") },
-                    leadingIcon = { Icon(Icons.Filled.DriveFileMove, null) },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null) },
                     onClick = { menu = false; onMove() },
                 )
                 DropdownMenuItem(

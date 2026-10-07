@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -82,7 +83,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val messages = Channel<UiMessage>(Channel.BUFFERED)
     val messageFlow: Flow<UiMessage> = messages.receiveAsFlow()
 
-    private val activeSpeeches: Flow<List<SpeechListItem>> = _query
+    private val activeSpeeches: Flow<List<SpeechListItem>> = combine(_query, _filter) { query, filter ->
+        // Searching folder names should not also scan the bodies of all speeches.
+        if (filter == LibraryFilter.Folders) "" else query
+    }
+        .distinctUntilChanged()
         .debounce(150)
         .flatMapLatest { q -> if (q.isBlank()) repo.observeActive() else repo.search(q) }
 
@@ -304,7 +309,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun moveToFolder(id: Long, folderId: Long?) {
         viewModelScope.launch {
-            val speech = repo.load(id) ?: return@launch
+            val speech = repo.observeItem(id).first() ?: return@launch
             if (speech.folderId == folderId) return@launch
             val destination = repo.observeFolders().first().firstOrNull { it.id == folderId }
             if (folderId != null && destination == null) {
