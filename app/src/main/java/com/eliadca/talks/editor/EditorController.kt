@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.eliadca.talks.core.doc.Align
 import com.eliadca.talks.core.doc.BlockType
+import com.eliadca.talks.core.doc.Markup
+import com.eliadca.talks.core.doc.toMarkdown
 import com.eliadca.talks.core.doc.RichDoc
 
 /**
@@ -49,8 +51,43 @@ class EditorController : EditorListener {
 
     val isAttached: Boolean get() = view != null
 
+    /** The Markdown source shown instead of the formatted page; null while the page is formatted. */
+    var markdown by mutableStateOf<String?>(null)
+        private set
+
+    /** The document the formatted page shows when it comes back from Markdown. */
+    private var pendingDoc: RichDoc? = null
+
+    /** Shows the speech as Markdown, to read or edit it as plain text. */
+    fun showMarkdown() {
+        val doc = snapshot() ?: return
+        markdown = doc.toMarkdown()
+    }
+
+    fun editMarkdown(text: String) {
+        if (text == markdown) return
+        markdown = text
+        onChanged?.invoke()
+    }
+
+    /** Back to the formatted page, with what was written in Markdown. */
+    fun showFormatted() {
+        val md = markdown ?: return
+        pendingDoc = Markup.parse(md)
+        markdown = null
+    }
+
+    /** The document a new page should load instead of the stored one, if any (taken once). */
+    fun takePendingDoc(): RichDoc? = pendingDoc.also { pendingDoc = null }
+
+    /** Forgets any Markdown view (another speech is opened). */
+    fun reset() {
+        markdown = null
+        pendingDoc = null
+    }
+
     /** The current document, or null when no editor is attached. */
-    fun snapshot(): RichDoc? = view?.toDocument()
+    fun snapshot(): RichDoc? = markdown?.let { Markup.parse(it) } ?: pendingDoc ?: view?.toDocument()
 
     // --- listener -----------------------------------------------------------------------------
 

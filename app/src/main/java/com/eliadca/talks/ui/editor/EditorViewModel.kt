@@ -50,6 +50,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     fun open(id: Long?) {
         if (id == openRequest) return
         flushNow()
+        controller.reset()
         openRequest = id
         if (id == null) {
             current = null

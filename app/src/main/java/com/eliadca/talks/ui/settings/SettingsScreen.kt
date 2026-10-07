@@ -144,6 +144,7 @@ fun SettingsScreen(
                         listOf(
                             MarkUnit.PHRASE to "Frase entera: queda quieta hasta que la terminas",
                             MarkUnit.SENTENCE to "Oración entera: bloques más largos",
+                            MarkUnit.PARAGRAPH to "Párrafo entero: los menos cambios",
                             MarkUnit.WORD to "Palabra a palabra",
                             MarkUnit.NONE to "Sin marcar: solo la línea de lectura",
                         ),
@@ -212,8 +213,9 @@ private fun engineLabel(e: EngineKind) = when (e) {
 }
 
 private fun markUnitLabel(u: MarkUnit): String = when (u) {
-    MarkUnit.PHRASE -> "Frase entera (recomendado)"
-    MarkUnit.SENTENCE -> "Oración entera"
+    MarkUnit.PHRASE -> "Frase entera"
+    MarkUnit.SENTENCE -> "Oración entera (recomendado)"
+    MarkUnit.PARAGRAPH -> "Párrafo entero"
     MarkUnit.WORD -> "Palabra a palabra"
     MarkUnit.NONE -> "Sin marcar"
 }

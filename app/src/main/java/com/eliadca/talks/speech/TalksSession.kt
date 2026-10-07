@@ -259,7 +259,7 @@ class TalksSession(
     /** Moves by [phrases] marked blocks (sentences when marking sentences, phrases otherwise; negative goes back). */
     fun nudge(phrases: Int) {
         scope.launch(trackerDispatcher) {
-            val unit = if (marking.unit == MarkUnit.SENTENCE) MarkUnit.SENTENCE else MarkUnit.PHRASE
+            val unit = if (marking.unit == MarkUnit.SENTENCE || marking.unit == MarkUnit.PARAGRAPH) marking.unit else MarkUnit.PHRASE
             var p = tracker.state.position
             repeat(kotlin.math.abs(phrases)) {
                 p = if (phrases > 0) index.nextBlockStart(unit, p) else index.previousBlockStart(unit, p)

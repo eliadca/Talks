@@ -84,6 +84,10 @@ import com.eliadca.talks.ui.home.formatDuration
 import androidx.compose.material.icons.filled.CopyAll
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Code
 
 /** The open speech: title, formatting bar, page and status line. */
 @Composable
@@ -167,7 +171,12 @@ fun EditorPane(
             TipIconButton(Icons.AutoMirrored.Filled.Undo, "Deshacer (Ctrl+Z)", enabled = c.canUndo) { c.undo() }
             TipIconButton(Icons.AutoMirrored.Filled.Redo, "Rehacer (Ctrl+Y)", enabled = c.canRedo) { c.redo() }
             BarSeparator()
-            TipIconButton(Icons.Filled.Search, "Buscar y reemplazar (Ctrl+F)", active = c.findOpen) { c.findOpen = !c.findOpen }
+            TipIconButton(
+                Icons.Filled.Code,
+                if (c.markdown != null) "Ver con formato" else "Ver y editar el Markdown",
+                active = c.markdown != null,
+            ) { if (c.markdown == null) c.showMarkdown() else c.showFormatted() }
+            TipIconButton(Icons.Filled.Search, "Buscar y reemplazar (Ctrl+F)", enabled = c.markdown == null, active = c.findOpen) { c.findOpen = !c.findOpen }
             TipIconButton(Icons.AutoMirrored.Filled.ViewList, "Esquema por títulos") { dialog = EditorDialog.Outline }
             TipIconButton(Icons.Filled.History, "Versiones anteriores") { dialog = EditorDialog.History }
             Box {
@@ -245,7 +254,7 @@ fun EditorPane(
             FindBar(c, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
         }
         Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-            FormatToolbar(c, Modifier.widthIn(max = 1100.dp))
+            if (c.markdown != null) MarkdownHint(onDone = c::showFormatted) else FormatToolbar(c, Modifier.widthIn(max = 1100.dp))
         }
 
         // --- the page ---
@@ -253,7 +262,11 @@ fun EditorPane(
             Column(Modifier.widthIn(max = 880.dp).fillMaxSize().padding(horizontal = 24.dp)) {
                 TitleField(vm.title, vm::onTitleChange, onNext = { c.focus(showKeyboard = true) })
                 Spacer(Modifier.height(4.dp))
-                PageEditor(speech.id, speech.doc, c, settings, dark, Modifier.weight(1f).fillMaxWidth())
+                if (c.markdown != null) {
+                    MarkdownEditor(c, settings, Modifier.weight(1f).fillMaxWidth())
+                } else {
+                    PageEditor(speech.id, speech.doc, c, settings, dark, Modifier.weight(1f).fillMaxWidth())
+                }
             }
         }
 
@@ -405,7 +418,7 @@ private fun PageEditor(
                 RichEditText(themed, style).also { view ->
                     view.tag = style
                     view.applyAppearance(textColor, hint, selection, settings.editorFontSp.toFloat(), settings.editorSerif)
-                    view.loadDocument(doc)
+                    view.loadDocument(controller.takePendingDoc() ?: doc)
                     controller.attach(view)
                 }
             },
@@ -423,6 +436,64 @@ private fun PageEditor(
             if (doc.text.isEmpty()) controller.focus(showKeyboard = true)
         }
     }
+}
+
+/** What can be written in Markdown, and the way back to the formatted page. */
+@Composable
+private fun MarkdownHint(onDone: () -> Unit) {
+    Row(
+        Modifier
+            .widthIn(max = 1100.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .padding(start = 16.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Code, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(
+            "Markdown: **negrita**  *cursiva*  ==resaltado==  # título  - lista  [nota]",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = onDone) { Text("Ver con formato", fontWeight = FontWeight.Bold) }
+    }
+}
+
+/** The speech as plain Markdown text, to read or edit as written. */
+@Composable
+private fun MarkdownEditor(controller: com.eliadca.talks.editor.EditorController, settings: AppSettings, modifier: Modifier) {
+    val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    AndroidView(
+        modifier = modifier.clipToBounds(),
+        factory = { ctx ->
+            android.widget.EditText(ctx).apply {
+                background = null
+                gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                typeface = android.graphics.Typeface.MONOSPACE
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                setHorizontallyScrolling(false)
+                isVerticalScrollBarEnabled = true
+                isScrollbarFadingEnabled = false
+                setLineSpacing(0f, 1.25f)
+                setText(controller.markdown ?: "")
+                addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                    override fun afterTextChanged(s: android.text.Editable?) { controller.editMarkdown(s?.toString() ?: "") }
+                })
+            }
+        },
+        update = { view ->
+            view.setTextColor(textColor)
+            view.textSize = (settings.editorFontSp - 2).coerceAtLeast(12).toFloat()
+        },
+    )
 }
 
 /** Notes for the speaker look like a soft sticky note. */

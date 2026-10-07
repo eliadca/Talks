@@ -8,6 +8,9 @@ enum class MarkUnit {
     /** The whole sentence: longer blocks, fewer changes. */
     SENTENCE,
 
+    /** The whole paragraph (very long ones in parts): the fewest changes. */
+    PARAGRAPH,
+
     /** A few words starting at the next word, moving along word by word. */
     WORD,
 

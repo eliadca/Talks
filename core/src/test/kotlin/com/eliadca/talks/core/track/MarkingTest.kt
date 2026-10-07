@@ -42,6 +42,20 @@ class MarkingTest {
         assertTrue("too many tiny phrases: $short of ${phrases.size}", short * 10 <= phrases.size)
     }
 
+    @Test fun paragraphsAreTheLongestBlocksAndNeverCrossALine() {
+        val paragraphs = blocks(MarkUnit.PARAGRAPH)
+        assertTrue("fewer than sentences", paragraphs.size < blocks(MarkUnit.SENTENCE).size)
+        for (b in paragraphs) {
+            assertTrue("too long: ${b.count()}", b.count() <= 90)
+            val text = ix.text.substring(ix.tokens[b.first].start, ix.tokens[b.last].end)
+            assertFalse("crosses a line: $text", text.contains('\n'))
+        }
+        // While a paragraph is being said its mark stays still.
+        val b = paragraphs.first { it.count() > 10 }
+        val first = ix.mark(b.first, Marking(MarkUnit.PARAGRAPH))
+        for (p in b.first..b.last - 2) assertEquals(first.from to first.until, ix.mark(p, Marking(MarkUnit.PARAGRAPH)).let { it.from to it.until })
+    }
+
     @Test fun sentencesAreLongerBlocks() {
         val sentences = blocks(MarkUnit.SENTENCE)
         assertTrue(sentences.size < blocks(MarkUnit.PHRASE).size)

@@ -139,7 +139,7 @@ app/    Android: Compose (biblioteca, ajustes, modo Talks), editor basado en Edi
 - Hay un gancho de pruebas, `AppContainer.speechEngineFactory`, para inyectar un reconocedor falso.
 
 ### Qué está verificado y qué no
-Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 176 pruebas automáticas (92 del motor, 84 con Robolectric) más 9 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
+Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 178 pruebas automáticas (93 del motor, 85 con Robolectric) más 9 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
 
 - **Seguimiento de voz** (`:core:test`, simulador de orador con reconocimiento defectuoso): el marcador se mantiene en su sitio en >99,5 % de las lecturas sin errores,
   >97 % con un 6 % de palabras mal reconocidas y un 3 % perdidas, >90 % con un 15 % mal reconocidas, >92 % improvisando frases nuevas y >90 % si lo improvisado reutiliza palabras del guion.

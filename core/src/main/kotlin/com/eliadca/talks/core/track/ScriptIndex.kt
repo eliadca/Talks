@@ -105,6 +105,13 @@ class ScriptIndex(val text: String, val tokens: List<ScriptToken>) {
 
     private fun endsSentence(t: Int) = tokens[t].boundary >= Boundary.SENTENCE
 
+    /** True after token t when a line break lies before token t+1. */
+    private val lineAfter = BooleanArray(size).also { b ->
+        for (t in 0 until size - 1) {
+            for (k in tokens[t].end until tokens[t + 1].start) if (text[k] == '\n') { b[t] = true; break }
+        }
+    }
+
     /** Where phrases begin: they end at commas, full stops and notes; tiny ones join a neighbour. */
     private val phraseStarts: IntArray = blocks(
         endsAfter = { t -> tokens[t].boundary >= Boundary.CLAUSE || breakAfter[t] },
@@ -185,7 +192,18 @@ class ScriptIndex(val text: String, val tokens: List<ScriptToken>) {
         split(best, until, maxWords, out)
     }
 
-    private fun startsFor(unit: MarkUnit): IntArray = if (unit == MarkUnit.SENTENCE) sentenceStarts else phraseStarts
+    /** Where paragraphs begin; very long ones are split near their middle. */
+    private val paragraphStarts: IntArray = blocks(
+        endsAfter = { t -> tokens[t].boundary >= Boundary.PARAGRAPH || lineAfter[t] },
+        minWords = 1,
+        maxWords = MAX_PARAGRAPH,
+    )
+
+    private fun startsFor(unit: MarkUnit): IntArray = when (unit) {
+        MarkUnit.SENTENCE -> sentenceStarts
+        MarkUnit.PARAGRAPH -> paragraphStarts
+        else -> phraseStarts
+    }
 
     /** Index in [starts] of the block that contains token [pos] (0 <= pos < size). */
     private fun blockIndex(starts: IntArray, pos: Int): Int {
@@ -257,7 +275,7 @@ class ScriptIndex(val text: String, val tokens: List<ScriptToken>) {
         return when (marking.unit) {
             MarkUnit.WORD -> Mark(d, wordWindowEnd(d, marking.maxWords), minOf(p, d), d)
             MarkUnit.NONE -> Mark(d, d, blockStart(MarkUnit.PHRASE, minOf(p, d)), d)
-            MarkUnit.PHRASE, MarkUnit.SENTENCE -> {
+            MarkUnit.PHRASE, MarkUnit.SENTENCE, MarkUnit.PARAGRAPH -> {
                 val starts = startsFor(marking.unit)
                 val voice = blockIndex(starts, p)
                 val shown = blockIndex(starts, d).coerceIn(voice - 1, voice + 1).coerceIn(0, starts.size - 1)
@@ -297,6 +315,7 @@ class ScriptIndex(val text: String, val tokens: List<ScriptToken>) {
         private const val MIN_PHRASE = 3
         private const val MAX_PHRASE = 16
         private const val MAX_SENTENCE = 30
+        private const val MAX_PARAGRAPH = 90
 
         /** The word-by-word window covers at least this many words before stopping at a comma. */
         private const val MIN_WINDOW = 3

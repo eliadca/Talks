@@ -416,6 +416,19 @@ class RichEditTextTest {
         assertEquals(BlockType.BULLET, doc().paragraphs().first().block)
     }
 
+    @Test fun theSpeechCanBeEditedAsMarkdownAndBack() {
+        val c = EditorController()
+        c.attach(edit)
+        edit.loadDocument(Markup.parse("# Título\nHola **mundo**"))
+        c.showMarkdown()
+        assertEquals("# Título\nHola **mundo**", c.markdown?.trim())
+        c.editMarkdown("# Título\nHola **mundo** y *todos*")
+        assertEquals(Markup.parse("# Título\nHola **mundo** y *todos*"), c.snapshot())
+        c.showFormatted()
+        assertEquals(null, c.markdown)
+        assertEquals(Markup.parse("# Título\nHola **mundo** y *todos*"), c.takePendingDoc())
+    }
+
     @Test fun markdownSavedAsPlainTextShowsFormattedWhenOpened() {
         edit.loadDocument(RichDoc("Hola **mundo** y *todos*"))
         assertEquals("Hola mundo y todos", doc().text)
