@@ -323,6 +323,9 @@ class TalksSession(
         if (pos > furthest) furthest = pos
         val m = index.mark(pos, marking)
         val marks = index.segments(m.from, m.until)
+        // Once finished, leave the final spoken line in place instead of scrolling to trailing
+        // blank lines, speaker notes or headings that are not part of the speech.
+        val focus = if (m.focus >= index.size) index.tokens.lastOrNull()?.start ?: 0 else index.startChar(m.focus)
         mutableState.update {
             it.copy(
                 position = pos,
@@ -331,7 +334,7 @@ class TalksSession(
                 finished = t.finished,
                 heard = heard ?: it.heard,
                 spokenEnd = index.startChar(m.dimUntil),
-                focus = index.startChar(m.focus),
+                focus = focus,
                 marks = marks,
                 progress = index.progress(pos),
                 manualMoves = if (manual) it.manualMoves + 1 else it.manualMoves,

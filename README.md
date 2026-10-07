@@ -13,6 +13,8 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 - **Sigue tu voz en español** y marca en pantalla **la frase que estás diciendo, entera y quieta**: no se mueve bajo tus ojos mientras la lees y solo
   salta a la siguiente cuando la terminas (subrayado + resaltado suave + flecha en el margen). Lo ya dicho se atenúa y el texto sube solo, línea a línea,
   manteniendo la línea actual a una altura fija con varias líneas por delante. **Las notas `[entre corchetes]` y los títulos nunca se marcan.**
+  **También llega hasta la última línea**, a la misma altura de lectura, incluso al girar la tablet o cambiar el tamaño de letra.
+  Al terminar, mantiene en pantalla la última línea hablada en vez de saltar a notas o líneas vacías posteriores.
 - **Botón «Marcado»** (en la barra de controles y en Ajustes): elige **Frase** (recomendado), **Oración** (bloques más largos), **Palabra a palabra**
   o **Sin marcar** (solo una línea de lectura), y **Atrasar / Adelantar** el marcado hasta 3 palabras respecto a tu voz para ajustarlo a tu ritmo.
 - **No se adelanta a tu voz**: una palabra suelta al final de una línea («eh», «este», una «y» de respiración) ya no hace saltar la primera palabra de la siguiente.
