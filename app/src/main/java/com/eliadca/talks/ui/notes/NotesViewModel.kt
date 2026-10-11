@@ -15,6 +15,8 @@ import com.eliadca.talks.bible.BiblePassage
 import com.eliadca.talks.container
 import com.eliadca.talks.core.bible.BibleReference
 import com.eliadca.talks.core.bible.BibleReferences
+import com.eliadca.talks.core.ink.InkDocument
+import com.eliadca.talks.core.ink.InkHistory
 import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.data.EngineKind
 import com.eliadca.talks.data.db.NoteEntity
@@ -46,6 +48,11 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
     val saveError = repo.error
     var note by mutableStateOf<NoteEntity?>(null); private set
     var body by mutableStateOf(TextFieldValue("")); private set
+    var ink by mutableStateOf(InkDocument()); private set
+    var canUndoInk by mutableStateOf(false); private set
+    var canRedoInk by mutableStateOf(false); private set
+    private val inkHistory = InkHistory()
+    private var savedInk = "{}"
     var entries by mutableStateOf(emptyList<TranscriptEntry>()); private set
     var partial by mutableStateOf(""); private set
     var listening by mutableStateOf(false); private set
@@ -98,10 +105,14 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
     private fun display(value: NoteEntity) {
         val transcript = try { json.decodeFromString<List<TranscriptEntry>>(value.transcript) }
         catch (e: Exception) { message = "No se pudo leer la transcripción guardada."; return }
+        val drawing = try { json.decodeFromString<InkDocument>(value.ink) }
+        catch (e: Exception) { message = "No se pudo leer la escritura guardada. Conserva una copia de seguridad."; return }
         lookup?.cancel(); lastDetection = null; passage = null; detected = emptyList()
         note = value
         body = TextFieldValue(value.body, TextRange(value.body.length))
         entries = transcript
+        inkHistory.reset(drawing); ink = drawing; canUndoInk = false; canRedoInk = false
+        savedInk = value.ink
     }
 
     fun backToList() { pause(); lookup?.cancel(); note = null; passage = null; detected = emptyList() }
@@ -112,6 +123,17 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
         if (changed) scheduleEditSave()
     }
     fun automatic(value: Boolean) { note = note?.copy(automatic = value); persist() }
+    fun editInk(value: InkDocument) {
+        if (note == null || value == ink) return
+        inkHistory.record(value); syncInk()
+    }
+    fun undoInk() { inkHistory.undo(); syncInk() }
+    fun redoInk() { inkHistory.redo(); syncInk() }
+    private fun syncInk() {
+        ink = inkHistory.document; canUndoInk = inkHistory.canUndo; canRedoInk = inkHistory.canRedo
+        savedInk = json.encodeToString(ink)
+        persist()
+    }
     fun toggleCitations(value: Boolean) {
         citationsEnabled = value
         lastDetection = null
@@ -132,7 +154,7 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
     private fun persist() {
         editSave?.cancel(); editSave = null
         val current = note ?: return
-        val snapshot = current.copy(body = body.text, transcript = json.encodeToString(entries), updatedAt = System.currentTimeMillis())
+        val snapshot = current.copy(body = body.text, transcript = json.encodeToString(entries), ink = savedInk, updatedAt = System.currentTimeMillis())
         note = snapshot
         repo.save(snapshot)
     }

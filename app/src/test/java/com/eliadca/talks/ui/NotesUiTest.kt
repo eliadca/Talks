@@ -9,6 +9,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -17,11 +18,15 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.eliadca.talks.bible.BiblePassage
 import com.eliadca.talks.core.bible.BibleReference
+import com.eliadca.talks.core.ink.InkDocument
+import com.eliadca.talks.core.ink.InkHistory
+import com.eliadca.talks.ui.notes.HandwritingNotePanel
 import com.eliadca.talks.ui.home.SidebarLayout
 import com.eliadca.talks.ui.notes.FloatingPassage
 import com.eliadca.talks.ui.notes.NotesWorkspace
 import com.eliadca.talks.ui.notes.TranscriptEntry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -137,5 +142,36 @@ class NotesUiTest {
         compose.onNodeWithTag("fragment-12").assertIsDisplayed()
         compose.runOnIdle { transcript = transcript + TranscriptEntry(13, "Última frase confirmada") }
         compose.onNodeWithTag("fragment-13").assertIsDisplayed()
+    }
+
+    @Test fun handwritingToolsDrawOverTextAndSaveWholePageOrSelectedAreaRuling() {
+        val history = InkHistory()
+        var ink by mutableStateOf(InkDocument())
+        compose.setContent {
+            MaterialTheme {
+                HandwritingNotePanel(TextFieldValue("Ideas de la reunión"), {}, ink,
+                    { history.record(it); ink = history.document }, history.canUndo, history.canRedo,
+                    { ink = history.undo() }, { ink = history.redo() }, Modifier.width(580.dp).fillMaxHeight())
+            }
+        }
+        compose.onNodeWithText("Lápiz").performClick()
+        compose.onNodeWithTag("ink-page").performTouchInput { swipe(Offset(70f, 100f), Offset(220f, 150f), 200) }
+        compose.runOnIdle { assertEquals(1, ink.strokes.size) }
+        compose.onNodeWithContentDescription("Deshacer escritura").performClick()
+        compose.runOnIdle { assertTrue(ink.strokes.isEmpty()) }
+        compose.onNodeWithContentDescription("Rehacer escritura").performClick()
+        compose.onNodeWithContentDescription("Tipo, grosor y color del lápiz").performScrollTo().performClick()
+        compose.onNodeWithText("Resaltador").performClick()
+        compose.onNodeWithContentDescription("Color #1565C0").performClick()
+        compose.onNodeWithText("Listo").performClick()
+        compose.onNodeWithText("Resaltador · grosor 5 · lápiz o dedo").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Renglones").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Renglones en toda la página").performClick()
+        compose.runOnIdle { assertTrue(ink.wholePageRuled) }
+        compose.onNodeWithText("Elegir una zona de la página").performClick()
+        compose.onNodeWithTag("ink-page").performTouchInput { swipe(Offset(60f, 200f), Offset(350f, 390f), 200) }
+        compose.runOnIdle { assertEquals(1, ink.areas.size); assertTrue(!ink.wholePageRuled) }
+        compose.onNodeWithTag("note-body").assertTextContains("Ideas de la reunión")
+        screenshot("notes-handwriting")
     }
 }

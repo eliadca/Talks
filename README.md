@@ -53,6 +53,9 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 
 ### Notas con voz y Biblia de Estudio
 - Sección **Notas** en el menú izquierdo, con título, búsqueda y guardado automático. Sus notas y transcripciones se conservan aparte de los discursos y también se incluyen en la copia JSON de seguridad.
+- En **Mi nota → Lápiz**, escribe a mano sobre cualquier zona de la misma página que contiene el texto. **Tipo, grosor y color del lápiz** ofrece bolígrafo, lápiz, pluma y resaltador, 12 colores y un color personalizado. Se conserva la presión del lápiz digital cuando está activada y el dispositivo la proporciona.
+- El **Borrador** elimina trazos completos; **Deshacer / Rehacer** recupera escritura y cambios de renglones. **Mover la página** permite desplazarte sin dibujar; puedes activar **Dibujar solo con lápiz digital** para usar el dedo para desplazarte. La palma se ignora durante un trazo de lápiz digital.
+- En **Renglones**, activa **Toda la página** o toca **Elegir una zona de la página** y arrastra un rectángulo. Puedes cambiar la separación o quitar los renglones de las zonas. Al final de la página, **Añadir espacio** amplía la superficie. Los trazos y renglones se guardan automáticamente y se incluyen en la copia de seguridad.
 - **Escuchar / Pausar** usa el motor de voz elegido en Ajustes (Android o Vosk). En tablet, transcripción y nota aparecen juntas; en ventanas pequeñas se alternan con las pestañas **Transcripción / Mi nota**, sin detener el micrófono.
 - En modo asistido, selecciona palabras de un fragmento, varios fragmentos mediante sus casillas o **Añadir todo**. Puedes copiar un fragmento, toda la transcripción o toda la nota.
 - **Automático** añade las nuevas frases confirmadas al final de la nota sin sustituir el texto que estás editando. Al pausar se conserva el último resultado provisional como **Sin confirmar**, disponible para añadirlo manualmente. El micrófono se pausa al abandonar Notas o pasar la app a segundo plano.
@@ -184,7 +187,7 @@ Cada cambio pasa por GitHub Actions, que compila la app y ejecuta las pruebas au
   (las pruebas usan un orador simulado, no audio real), el comportamiento exacto del S Pen y de los mandos Bluetooth concretos.
   Por eso el modo Talks incluye prueba de micrófono, respaldo manual y aviso de errores. **Ensaya con tu equipo antes de un acto importante.**
 
-La sección Notas se verifica con pruebas de selección de palabras, modo automático, guardado ordenado, migración de la base de datos, copia de seguridad y citas entre segmentos. El lector JWPUB se verifica con archivos cifrados de prueba y, localmente, con la Biblia de Estudio real en español.
+La sección Notas se verifica con pruebas de selección de palabras, modo automático, guardado ordenado, migraciones de la base de datos, copia de seguridad, citas entre segmentos y escritura a mano (presión, rechazo de palma, coordenadas al cambiar tamaño, borrador, deshacer/rehacer y renglones por zona). El lector JWPUB se verifica con archivos cifrados de prueba y, localmente, con la Biblia de Estudio real en español.
 
 ## Privacidad
 

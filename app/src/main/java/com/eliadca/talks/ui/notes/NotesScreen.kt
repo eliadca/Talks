@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.eliadca.talks.bible.BiblePassage
 import com.eliadca.talks.core.bible.BibleReference
 import com.eliadca.talks.core.text.SpanishText
+import com.eliadca.talks.core.ink.InkDocument
 import com.eliadca.talks.data.db.NoteListItem
 import com.eliadca.talks.export.Clipboard
 import com.eliadca.talks.speech.EngineState
@@ -104,9 +105,13 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
                             label = { Text(ref.label) }, leadingIcon = { Icon(Icons.Filled.MenuBook, null, Modifier.size(16.dp)) }) }
                     }
                 }
-                NotesWorkspace(entries = vm.entries, partial = vm.partial, body = vm.body,
-                    automatic = vm.note!!.automatic, wide = wide, onEdit = vm::edit, onAdd = vm::addEntries, onInsert = vm::insert,
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                key(vm.note!!.id) {
+                    NotesWorkspace(entries = vm.entries, partial = vm.partial, body = vm.body,
+                        automatic = vm.note!!.automatic, wide = wide, onEdit = vm::edit, onAdd = vm::addEntries, onInsert = vm::insert,
+                        ink = vm.ink, onInkChange = vm::editInk, canUndoInk = vm.canUndoInk, canRedoInk = vm.canRedoInk,
+                        onUndoInk = vm::undoInk, onRedoInk = vm::redoInk,
+                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                }
                 MicrophoneBar(vm.listening, vm.engineState, vm.note!!.automatic, vm.level, vm::automatic,
                     onToggle = {
                         if (vm.listening) vm.pause()
@@ -198,12 +203,14 @@ private fun NoteLibrary(notes: List<NoteListItem>, onOpen: (Long) -> Unit, onDel
 fun NotesWorkspace(
     entries: List<TranscriptEntry>, partial: String, body: TextFieldValue, automatic: Boolean, wide: Boolean,
     onEdit: (TextFieldValue) -> Unit, onAdd: (Set<Long>) -> Unit, onInsert: (String) -> Unit, modifier: Modifier = Modifier,
+    ink: InkDocument = InkDocument(), onInkChange: (InkDocument) -> Unit = {},
+    canUndoInk: Boolean = false, canRedoInk: Boolean = false, onUndoInk: () -> Unit = {}, onRedoInk: () -> Unit = {},
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     if (wide) {
         Row(modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TranscriptPanel(entries, partial, automatic, onAdd, onInsert, Modifier.weight(1f).fillMaxHeight())
-            NotePanel(body, onEdit, Modifier.weight(1f).fillMaxHeight())
+            HandwritingNotePanel(body, onEdit, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk, Modifier.weight(1f).fillMaxHeight())
         }
     } else {
         Column(modifier.fillMaxSize()) {
@@ -212,7 +219,7 @@ fun NotesWorkspace(
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Mi nota") })
             }
             if (tab == 0) TranscriptPanel(entries, partial, automatic, onAdd, onInsert, Modifier.weight(1f).fillMaxWidth())
-            else NotePanel(body, onEdit, Modifier.weight(1f).fillMaxWidth())
+            else HandwritingNotePanel(body, onEdit, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk, Modifier.weight(1f).fillMaxWidth())
         }
     }
 }
@@ -303,26 +310,6 @@ private fun TranscriptCard(entry: TranscriptEntry, selected: Boolean, onSelected
                     Text(if (!value.selection.collapsed) "Añadir selección" else if (entry.added) "Añadido" else "Añadir")
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun NotePanel(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit, modifier: Modifier) {
-    val context = LocalContext.current
-    Surface(modifier, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Mi nota", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                IconButton(onClick = { Clipboard.copy(context, "Nota", body.text) }, enabled = body.text.isNotBlank()) { Icon(Icons.Filled.ContentCopy, "Copiar nota completa") }
-            }
-            HorizontalDivider()
-            BasicTextField(body, onEdit, modifier = Modifier.weight(1f).fillMaxWidth().padding(12.dp)
-                .verticalScroll(rememberScrollState()).testTag("note-body"),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                decorationBox = { field ->
-                    Box { if (body.text.isEmpty()) Text("Escribe tus ideas o añade fragmentos de la transcripción…", color = MaterialTheme.colorScheme.onSurfaceVariant); field() }
-                })
         }
     }
 }

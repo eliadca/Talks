@@ -6,6 +6,11 @@ import android.net.Uri
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.eliadca.talks.core.doc.Markup
+import com.eliadca.talks.core.ink.InkDocument
+import com.eliadca.talks.core.ink.InkPoint
+import com.eliadca.talks.core.ink.PenKind
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import com.eliadca.talks.data.BackupManager
 import com.eliadca.talks.data.NotesRepository
 import com.eliadca.talks.data.SpeechRepository
@@ -43,7 +48,8 @@ class NotesPersistenceTest {
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use {
             it.execSQL("DROP TABLE notes"); it.execSQL("DELETE FROM room_master_table"); it.version = 1
         }
-        val upgraded = Room.databaseBuilder(context, TalksDatabase::class.java, name).addMigrations(TalksDatabase.MIGRATION_1_2).build()
+        val upgraded = Room.databaseBuilder(context, TalksDatabase::class.java, name)
+            .addMigrations(TalksDatabase.MIGRATION_1_2, TalksDatabase.MIGRATION_2_3).build()
         try {
             assertEquals(speech, upgraded.speeches().get(id))
             assertEquals(folder, upgraded.folders().all().single().id)
@@ -52,6 +58,24 @@ class NotesPersistenceTest {
             val noteId = upgraded.notes().insert(NoteEntity(title = "Nueva nota", createdAt = 1, updatedAt = 1))
             assertEquals("Nueva nota", upgraded.notes().get(noteId)!!.title)
         } finally { upgraded.close() }
+    }
+
+    @Test fun migrationAddsInkWithoutChangingAnExistingListeningNote() = runBlocking {
+        val name = "migration-ink.db"
+        context.deleteDatabase(name)
+        val original = Room.databaseBuilder(context, TalksDatabase::class.java, name).build()
+        val saved = NoteEntity(id = 7, title = "Ideas", body = "Conservar texto", transcript = "[]", automatic = true, createdAt = 5, updatedAt = 8)
+        original.notes().insert(saved); original.close()
+        SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("ALTER TABLE notes RENAME TO old_notes")
+            it.execSQL("CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, transcript TEXT NOT NULL, automatic INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+            it.execSQL("INSERT INTO notes SELECT id, title, body, transcript, automatic, createdAt, updatedAt FROM old_notes")
+            it.execSQL("DROP TABLE old_notes")
+            it.execSQL("CREATE INDEX index_notes_updatedAt ON notes (updatedAt)")
+            it.execSQL("DELETE FROM room_master_table"); it.version = 2
+        }
+        val upgraded = Room.databaseBuilder(context, TalksDatabase::class.java, name).addMigrations(TalksDatabase.MIGRATION_2_3).build()
+        try { assertEquals(saved, upgraded.notes().get(7)) } finally { upgraded.close() }
     }
 
     @Test fun orderedSavesCannotOverwriteNewerEditsAndDeletionWaitsForPendingWrites() = runBlocking {
@@ -73,7 +97,10 @@ class NotesPersistenceTest {
         val db = Room.inMemoryDatabaseBuilder(context, TalksDatabase::class.java).build()
         val destination = Room.inMemoryDatabaseBuilder(context, TalksDatabase::class.java).build()
         try {
-            db.notes().insert(NoteEntity(title = "Reunión", body = "Mis ideas", transcript = "[{\"id\":1,\"text\":\"Original\"}]", automatic = true, createdAt = 100, updatedAt = 200))
+            val drawing = InkDocument(wholePageRuled = true).addStroke(PenKind.FOUNTAIN, 0xff123456.toInt(), 7f,
+                listOf(InkPoint(20f, 90f, .2f), InkPoint(90f, 170f, .8f)))
+            db.notes().insert(NoteEntity(title = "Reunión", body = "Mis ideas", transcript = "[{\"id\":1,\"text\":\"Original\"}]", automatic = true, createdAt = 100, updatedAt = 200,
+                ink = Json.encodeToString(drawing)))
             SpeechRepository(db).create("Discurso previo", Markup.parse("Conservar"))
             val file = File(context.cacheDir, "notes-backup.json")
             val uri = Uri.fromFile(file)

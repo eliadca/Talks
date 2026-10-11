@@ -7,6 +7,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.eliadca.talks.TalksApp
 import com.eliadca.talks.core.bible.BibleReference
+import com.eliadca.talks.core.ink.InkPoint
+import com.eliadca.talks.core.ink.PenKind
 import com.eliadca.talks.speech.*
 import com.eliadca.talks.ui.notes.NotesViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -53,6 +55,12 @@ class NotesViewModelTest {
         try {
             vm.create(); until { vm.note != null }
             vm.title("Notas de reunión")
+            val written = vm.ink.addStroke(PenKind.PENCIL, 0xff1965a3.toInt(), 6f,
+                listOf(InkPoint(200f, 300f, .2f), InkPoint(500f, 350f, .8f)))
+                .addArea(InkPoint(100f, 600f), InkPoint(900f, 1000f))
+            vm.editInk(written)
+            vm.undoInk(); assertTrue(vm.ink.strokes.isEmpty())
+            vm.redoInk(); assertEquals(written, vm.ink)
             vm.start(); until { vm.engineState == EngineState.LISTENING }
             engine.partial("Una idea inicial"); until { vm.partial.isNotEmpty() }
             assertTrue(vm.entries.isEmpty()); assertTrue(vm.body.text.isEmpty())
@@ -76,6 +84,8 @@ class NotesViewModelTest {
             assertEquals(expected, vm.body.text)
             assertEquals(3, vm.entries.size)
             assertTrue(vm.note!!.automatic)
+            assertEquals(written, vm.ink)
+            assertFalse(vm.canUndoInk)
             assertEquals(expected, runBlocking { app.container.notes.load(id) }!!.body)
         } finally {
             store.clear(); runBlocking { app.container.notes.flush() }

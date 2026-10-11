@@ -60,6 +60,7 @@ private data class BackupSession(
 private data class BackupNote(
     val title: String, val body: String, val transcript: String = "[]", val automatic: Boolean = false,
     val createdAt: Long, val updatedAt: Long,
+    val ink: String = "{}",
 )
 
 @Serializable
@@ -100,7 +101,7 @@ class BackupManager(
             },
             versions = db.versions().all().map { BackupVersion(it.speechId, it.createdAt, it.title, it.body, it.wordCount, it.label) },
             sessions = db.sessions().all().map { BackupSession(it.speechId, it.startedAt, it.durationMs, it.wordsSpoken, it.wpm, it.completion, it.engine) },
-            notes = db.notes().all().map { BackupNote(it.title, it.body, it.transcript, it.automatic, it.createdAt, it.updatedAt) },
+            notes = db.notes().all().map { BackupNote(it.title, it.body, it.transcript, it.automatic, it.createdAt, it.updatedAt, it.ink) },
         )
         val text = json.encodeToString(BackupFile.serializer(), file)
         resolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
@@ -173,7 +174,7 @@ class BackupManager(
             for (n in file.notes) {
                 if (!existingNotes.add(n.title to n.createdAt)) { skipped++; continue }
                 db.notes().insert(NoteEntity(title = n.title, body = n.body, transcript = n.transcript,
-                    automatic = n.automatic, createdAt = n.createdAt, updatedAt = n.updatedAt))
+                    automatic = n.automatic, createdAt = n.createdAt, updatedAt = n.updatedAt, ink = n.ink))
                 addedNotes++
             }
             BackupSummary(added, newFolders, skipped, addedNotes)

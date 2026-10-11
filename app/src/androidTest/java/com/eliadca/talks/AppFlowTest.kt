@@ -15,6 +15,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.assertIsEnabled
@@ -539,19 +541,27 @@ class AppFlowTest {
         waitForText("Añadir a nota")
         compose.onNodeWithTag("floating-citation").assertExists()
         compose.onNodeWithText("Añadir a nota").performClick()
-        compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba")
+        compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba", substring = true)
         Shots.take("notes-transcript-citation")
         compose.onNodeWithContentDescription("Cerrar cita").performClick()
         clickVisible("Pausar")
+        compose.onNodeWithText("Lápiz").performClick()
+        compose.onNodeWithTag("ink-page").performTouchInput {
+            swipe(androidx.compose.ui.geometry.Offset(100f, 100f), androidx.compose.ui.geometry.Offset(320f, 180f), 300)
+        }
+        compose.onNodeWithContentDescription("Deshacer escritura").assertIsEnabled()
+        Shots.take("notes-handwriting")
         compose.onNodeWithContentDescription("Volver a notas").performClick()
         waitForText("Ideas de reunión")
         clickVisible("Ideas de reunión")
-        compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba")
+        compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba", substring = true)
         runBlocking {
             container.notes.flush()
             val note = container.database.notes().all().single()
             assertTrue(note.body.contains("Una idea importante para guardar"))
             assertTrue(note.transcript.contains("Juan capítulo tres"))
+            val ink = kotlinx.serialization.json.Json.decodeFromString<com.eliadca.talks.core.ink.InkDocument>(note.ink)
+            assertEquals(1, ink.strokes.size)
         }
     }
 
