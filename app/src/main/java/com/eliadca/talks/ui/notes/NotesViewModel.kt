@@ -118,6 +118,9 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
         if (!value) { lookup?.cancel(); passage = null; detected = emptyList() }
     }
     fun dismissMessage() { message = null }
+    fun permissionDenied() {
+        message = "Permite el acceso al micrófono para transcribir. Puedes activarlo en Ajustes de Android → Aplicaciones → Talks → Permisos."
+    }
     fun expandPassage(value: Boolean) { passageExpanded = value }
     fun dismissPassage() { passage = null }
 

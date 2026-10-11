@@ -126,4 +126,16 @@ class NotesUiTest {
         compose.onNodeWithText("Cerrar menú").performClick()
         compose.onNodeWithTag("left-menu").assertWidthIsEqualTo(88.dp)
     }
+
+    @Test fun aLongTranscriptShowsTheLatestConfirmedPhraseAsNewSpeechArrives() {
+        var transcript by mutableStateOf((1L..12L).map { TranscriptEntry(it, "Fragmento $it") })
+        compose.setContent {
+            MaterialTheme {
+                NotesWorkspace(transcript, "", TextFieldValue(""), false, true, {}, {}, {}, Modifier.fillMaxWidth().height(320.dp))
+            }
+        }
+        compose.onNodeWithTag("fragment-12").assertIsDisplayed()
+        compose.runOnIdle { transcript = transcript + TranscriptEntry(13, "Última frase confirmada") }
+        compose.onNodeWithTag("fragment-13").assertIsDisplayed()
+    }
 }

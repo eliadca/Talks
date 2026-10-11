@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -47,6 +48,7 @@ import com.eliadca.talks.core.text.SpanishText
 import com.eliadca.talks.data.db.NoteListItem
 import com.eliadca.talks.export.Clipboard
 import com.eliadca.talks.speech.EngineState
+import kotlinx.coroutines.launch
 
 @Composable
 fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Modifier, allowBack: Boolean = true) {
@@ -57,7 +59,7 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
     var bibleOptions by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf<NoteListItem?>(null) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) vm.start()
+        if (granted) vm.start() else vm.permissionDenied()
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importBible) }
     DisposableEffect(lifecycle) {
@@ -221,9 +223,15 @@ private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, aut
     val context = LocalContext.current
     var selected by remember { mutableStateOf(emptySet<Long>()) }
     val list = rememberLazyListState()
-    val following = remember { derivedStateOf { !list.canScrollForward } }
+    var following by remember { mutableStateOf(true) }
+    val dragging by list.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(dragging) {
+        if (dragging) following = false
+        else if (!list.canScrollForward) following = true
+    }
     LaunchedEffect(entries.size, partial) {
-        if (following.value && (entries.isNotEmpty() || partial.isNotEmpty())) list.animateScrollToItem(entries.size.coerceAtMost(list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+        val last = entries.size - 1 + if (partial.isNotBlank()) 1 else 0
+        if (following && last >= 0) list.animateScrollToItem(last)
     }
     Surface(modifier, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.padding(12.dp)) {
@@ -243,6 +251,13 @@ private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, aut
                     Icon(Icons.Filled.Add, null, Modifier.size(16.dp)); Text(if (selected.isEmpty()) "Añadir todo" else "Añadir selección (${selected.size})")
                 }
                 if (selected.isNotEmpty()) TextButton(onClick = { selected = emptySet() }) { Text("Cancelar") }
+                if (!following) {
+                    val scope = rememberCoroutineScope()
+                    IconButton(onClick = {
+                        following = true
+                        scope.launch { list.animateScrollToItem((entries.size - 1 + if (partial.isNotBlank()) 1 else 0).coerceAtLeast(0)) }
+                    }) { Icon(Icons.Filled.VerticalAlignBottom, "Ver lo último") }
+                }
             }
             HorizontalDivider()
             LazyColumn(Modifier.weight(1f).testTag("transcript"), state = list, contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
