@@ -118,7 +118,7 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
         vm.passage?.let { passage ->
             FloatingPassage(passage, vm.passageExpanded, vm::expandPassage, vm::dismissPassage, vm::addPassage,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(start = 16.dp, end = 16.dp, bottom = 98.dp)
-                    .widthIn(max = 420.dp).fillMaxWidth(if (wide) .5f else 1f))
+                    .width(minOf(420.dp, maxWidth - 32.dp)))
         }
     }
 
