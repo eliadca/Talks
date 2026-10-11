@@ -198,7 +198,7 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
                     modifier = Modifier.fillMaxWidth().padding((40 * factor).dp).testTag("note-body"),
                     textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = (46 * factor).sp,
                         lineHeight = (64 * factor).sp, color = MaterialTheme.colorScheme.onSurface),
-                    onTextLayout = { result -> textHeight = result.size.height / density.density / factor + 80 },
+                    onTextLayout = { result -> textHeight = result.multiParagraph.height / density.density / factor + 80 },
                     decorationBox = { field ->
                         Box {
                             if (body.text.isEmpty() && ink.strokes.isEmpty() && tool == InkTool.TEXT) Text(

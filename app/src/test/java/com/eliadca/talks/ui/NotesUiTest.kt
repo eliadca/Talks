@@ -174,4 +174,17 @@ class NotesUiTest {
         compose.onNodeWithTag("note-body").assertTextContains("Ideas de la reunión")
         screenshot("notes-handwriting")
     }
+
+    @Test fun aLongTypedNoteExpandsTheSamePageUsedForHandwriting() {
+        val text = (1..200).joinToString("\n") { "Idea $it de la reunión" }
+        compose.setContent {
+            MaterialTheme {
+                HandwritingNotePanel(TextFieldValue(text), {}, InkDocument(), {}, false, false, {}, {},
+                    Modifier.width(400.dp).fillMaxHeight())
+            }
+        }
+        compose.onNodeWithTag("ink-page").assertHeightIsAtLeast(4000.dp)
+        compose.onNodeWithText("Añadir espacio a la página").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("note-body").assertTextContains("Idea 200 de la reunión", substring = true)
+    }
 }
