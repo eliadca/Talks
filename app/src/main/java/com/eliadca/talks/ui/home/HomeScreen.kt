@@ -23,19 +23,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -59,11 +55,13 @@ import com.eliadca.talks.ui.components.EmptyState
 import com.eliadca.talks.ui.editor.EditorPane
 import com.eliadca.talks.ui.editor.EditorViewModel
 import com.eliadca.talks.ui.editor.MoveToFolderDialog
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.eliadca.talks.ui.notes.NotesScreen
+import com.eliadca.talks.ui.notes.NotesViewModel
 import kotlinx.coroutines.launch
 
 /**
- * The main screen. The menu is folded into a slim rail (its full version opens on demand, never
- * by swiping); the list of speeches sits next to the editor when there is room for both, and can
+ * The main screen. The menu expands within the existing left area, never by swiping; the list of speeches sits next to the editor when there is room for both, and can
  * be folded away to write with the whole screen. Narrow windows show the list or the editor.
  */
 @Composable
@@ -90,7 +88,9 @@ fun HomeScreen(
 
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    var menuExpanded by rememberSaveable { mutableStateOf(false) }
+    var notesOpen by rememberSaveable { mutableStateOf(false) }
+    val notes: NotesViewModel = viewModel()
     var confirmDelete by remember { mutableStateOf<SpeechListItem?>(null) }
     var movingSpeech by remember { mutableStateOf<SpeechListItem?>(null) }
     /** Writing with the whole screen: the list of speeches is folded away. */
@@ -105,8 +105,8 @@ fun HomeScreen(
     }
 
     val pace = if (home.paceWpm > 0) home.paceWpm else settings.wordsPerMinute
-    val openMenu: () -> Unit = { scope.launch { drawerState.open() } }
-    val closeMenu: () -> Unit = { scope.launch { drawerState.close() } }
+    val openMenu: () -> Unit = { menuExpanded = !menuExpanded }
+    val closeMenu: () -> Unit = { menuExpanded = false }
 
     val context = LocalContext.current
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -122,8 +122,8 @@ fun HomeScreen(
         copyTemplate = home::copyTemplate,
     )
     val drawerImportActions = ImportActions(
-        files = { closeMenu(); importActions.files() },
-        paste = { closeMenu(); importActions.paste() },
+        files = { notesOpen = false; closeMenu(); importActions.files() },
+        paste = { notesOpen = false; closeMenu(); importActions.paste() },
         copyTemplate = { closeMenu(); importActions.copyTemplate() },
     )
 
@@ -141,18 +141,20 @@ fun HomeScreen(
     ) {
         val showRail = maxWidth >= RAIL_MIN_WIDTH
         val listWidth = if (maxWidth >= 1200.dp) 360.dp else 330.dp
-        val railWidth = if (showRail) RAIL_WIDTH else 0.dp
+        val railWidth = if (showRail) { if (menuExpanded) 280.dp else RAIL_WIDTH } else 0.dp
         val twoPane = maxWidth - railWidth - listWidth >= MIN_EDITOR_WIDTH
         val navigate: (LibraryFilter) -> Unit = { destination ->
+            notesOpen = false
             home.setFilter(destination)
             focusMode = false
             // In a narrow window, navigation must actually reveal the library.
             if (!twoPane) home.select(null)
         }
+        BackHandler(enabled = notesOpen && notes.note == null && !menuExpanded) { notesOpen = false }
 
         BackHandler(
             enabled = filter.isFolderLocation && filter != LibraryFilter.Folders &&
-                (selectedId == null || (twoPane && !focusMode)) && drawerState.isClosed,
+                (selectedId == null || (twoPane && !focusMode)) && !menuExpanded && !notesOpen,
         ) { navigate(LibraryFilter.Folders) }
 
         val list: @Composable (Modifier) -> Unit = { mod ->
@@ -254,60 +256,52 @@ fun HomeScreen(
             }
         }
 
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            // Only a swipe that closes the open menu is honoured: scrolling never opens it.
-            gesturesEnabled = drawerState.isOpen,
-            drawerContent = {
-                ModalDrawerSheet(Modifier.width(320.dp)) {
-                    SidebarContent(
-                        filter = filter,
-                        counts = counts,
-                        onFilter = {
-                            navigate(it)
-                            closeMenu()
-                        },
-                        onNewSpeech = {
-                            home.createSpeech()
-                            closeMenu()
-                        },
-                        onSettings = {
-                            closeMenu()
-                            onOpenSettings()
-                        },
-                        onClose = closeMenu,
-                        importActions = drawerImportActions,
-                    )
-                }
+        val newSpeech: () -> Unit = { notesOpen = false; home.createSpeech(); closeMenu() }
+        SidebarLayout(
+            expanded = menuExpanded,
+            onClose = closeMenu,
+            showRail = showRail,
+            menu = {
+                SidebarContent(
+                    filter = filter, counts = counts,
+                    onFilter = { navigate(it); closeMenu() },
+                    onNewSpeech = newSpeech,
+                    onSettings = { closeMenu(); onOpenSettings() },
+                    onClose = closeMenu,
+                    importActions = drawerImportActions,
+                    onNotes = { notesOpen = true; closeMenu() },
+                    notesSelected = notesOpen,
+                )
             },
-        ) {
-            Row(Modifier.fillMaxSize()) {
-                if (showRail) {
-                    LibraryRail(
-                        filter = filter,
-                        counts = counts,
-                        onNewSpeech = home::createSpeech,
-                        onFilter = navigate,
-                        onSettings = onOpenSettings,
-                        modifier = Modifier.width(RAIL_WIDTH).fillMaxHeight(),
-                    )
-                }
-                if (twoPane) {
-                    AnimatedVisibility(
-                        visible = !(focusMode && selectedId != null),
-                        enter = expandHorizontally(),
-                        exit = shrinkHorizontally(),
-                    ) {
-                        Row(Modifier.fillMaxHeight()) {
-                            list(Modifier.width(listWidth).fillMaxHeight())
-                            VerticalDivider()
+            rail = {
+                LibraryRail(
+                    filter = filter, counts = counts, onNewSpeech = newSpeech,
+                    onFilter = navigate, onSettings = onOpenSettings,
+                    onMenu = openMenu, onNotes = { notesOpen = true }, notesSelected = notesOpen,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            },
+        ) { contentModifier ->
+            if (notesOpen) {
+                NotesScreen(notes, openMenu, contentModifier, allowBack = !menuExpanded)
+            } else {
+                Row(contentModifier) {
+                    if (twoPane) {
+                        AnimatedVisibility(
+                            visible = !(focusMode && selectedId != null),
+                            enter = expandHorizontally(), exit = shrinkHorizontally(),
+                        ) {
+                            Row(Modifier.fillMaxHeight()) {
+                                list(Modifier.width(listWidth).fillMaxHeight())
+                                VerticalDivider()
+                            }
                         }
-                    }
-                    editorPane(Modifier.weight(1f).fillMaxHeight(), false)
-                } else {
-                    BackHandler(enabled = selectedId != null && drawerState.isClosed) { home.select(null) }
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        if (selectedId == null) list(Modifier.fillMaxSize()) else editorPane(Modifier.fillMaxSize(), true)
+                        editorPane(Modifier.weight(1f).fillMaxHeight(), false)
+                    } else {
+                        BackHandler(enabled = selectedId != null && !menuExpanded) { home.select(null) }
+                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                            if (selectedId == null) list(Modifier.fillMaxSize()) else editorPane(Modifier.fillMaxSize(), true)
+                        }
                     }
                 }
             }

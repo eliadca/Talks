@@ -5,6 +5,20 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+/** Listening notes are kept apart from speeches, including their original transcript. */
+@Entity(tableName = "notes", indices = [Index("updatedAt")])
+data class NoteEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val body: String = "",
+    val transcript: String = "[]",
+    val automatic: Boolean = false,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+data class NoteListItem(val id: Long, val title: String, val preview: String, val updatedAt: Long)
+
 @Entity(tableName = "folders")
 data class FolderEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

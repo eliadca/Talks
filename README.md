@@ -51,8 +51,18 @@ mirar al auditorio y volver a la tablet sin perderte, aunque improvises o cambie
 - **Pegar con formato**: el Markdown que pegues (por ejemplo, un discurso escrito por tu IA) llega con sus títulos, negritas, listas y notas;
   lo que copies dentro de Talks se pega con su formato; el resto entra como texto plano. «Pegar como texto sin formato» deja los signos tal cual.
 
+### Notas con voz y Biblia de Estudio
+- Sección **Notas** en el menú izquierdo, con título, búsqueda y guardado automático. Sus notas y transcripciones se conservan aparte de los discursos y también se incluyen en la copia JSON de seguridad.
+- **Escuchar / Pausar** usa el motor de voz elegido en Ajustes (Android o Vosk). En tablet, transcripción y nota aparecen juntas; en ventanas pequeñas se alternan con las pestañas **Transcripción / Mi nota**, sin detener el micrófono.
+- En modo asistido, selecciona palabras de un fragmento, varios fragmentos mediante sus casillas o **Añadir todo**. Puedes copiar un fragmento, toda la transcripción o toda la nota.
+- **Automático** añade las nuevas frases confirmadas al final de la nota sin sustituir el texto que estás editando. Al pausar se conserva el último resultado provisional como **Sin confirmar**, disponible para añadirlo manualmente. El micrófono se pausa al abandonar Notas o pasar la app a segundo plano.
+- **Biblia de Estudio → Importar JWPUB** abre un archivo local en español. **Descargar desde jw.org** lleva a la página oficial. Importa una vez y los versículos quedan disponibles sin conexión; la Biblia no se incluye en el APK ni en la copia JSON de las notas.
+- Reconoce nombres de libros y números dichos en español: `Juan 3:16`, «Juan capítulo tres versículo dieciséis», «primera de Juan cuatro ocho», rangos y citas divididas entre dos resultados del motor. La referencia se valida contra los versículos realmente disponibles en la Biblia importada.
+- La cita aparece en una **tarjeta flotante** que se puede contraer, expandir, cerrar, copiar o **Añadir a nota**. Las últimas citas detectadas también permanecen como accesos en la parte superior.
+- El lector abre `manifest.json` y el ZIP `contents`, lee la identidad de la publicación, aplica SHA-256/XOR, AES-CBC y zlib y guarda solo el texto de los versículos. Una importación fallida conserva la Biblia anterior. Referencia del formato: [jwpub-toolkit](https://github.com/thenights20/jwpub-toolkit).
+
 ### Biblioteca
-- **Menú lateral plegado** en una barra estrecha (nuevo discurso, Todos, Fijados, Carpetas, Papelera y **Ajustes**). El menú completo se abre con el botón ☰
+- **Menú lateral plegado** en una barra estrecha (nuevo discurso, Todos, **Notas**, Fijados, Carpetas, Papelera y **Ajustes**). El botón **Menú** expande las opciones en la misma zona izquierda y deja visible el contenido
   y **nunca se abre al deslizar**, así que moverte por un discurso no lo despliega por accidente.
 - Lista y editor lado a lado en horizontal; en vertical se turnan (lista → discurso → volver). Compatible con multiventana y DeX.
 - **Carpetas en el panel de la biblioteca**, como en Drive: pulsa «Carpetas» en el menú lateral para verlas en el mismo espacio que la lista de discursos.
@@ -146,7 +156,7 @@ app/    Android: Compose (biblioteca, ajustes, modo Talks), editor basado en Edi
 - Hay un gancho de pruebas, `AppContainer.speechEngineFactory`, para inyectar un reconocedor falso.
 
 ### Qué está verificado y qué no
-Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 178 pruebas automáticas (93 del motor, 85 con Robolectric) más 9 pruebas en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
+Cada cambio pasa por GitHub Actions, que compila la app y ejecuta las pruebas automáticas de Kotlin y Robolectric, además de los flujos en un emulador de tablet. Instala siempre el APK de una ejecución en verde (✓); las *Releases* solo se crean si todo pasa.
 
 - **Seguimiento de voz** (`:core:test`, simulador de orador con reconocimiento defectuoso): el marcador se mantiene en su sitio en >99,5 % de las lecturas sin errores,
   >97 % con un 6 % de palabras mal reconocidas y un 3 % perdidas, >90 % con un 15 % mal reconocidas, >92 % improvisando frases nuevas y >90 % si lo improvisado reutiliza palabras del guion.
@@ -165,16 +175,18 @@ Cada cambio pasa por GitHub Actions, que compila la app y ejecuta 178 pruebas au
   y pegar Markdown o texto copiado en Talks con su formato (un solo paso para deshacer).
 - **Markdown** (`:core:test`): lo que exporta Talks se vuelve a importar idéntico (muestras incluidas), los signos sueltos se escapan, el Markdown típico de una IA
   (bloques de código, `####`, `__negrita__`, enlaces) se importa limpio, y la plantilla para tu IA explica cada formato y su ejemplo los usa todos.
-- **App real en un emulador de tablet** (Pixel Tablet, Android 14, 9 pruebas, con capturas de pantalla reales en cada ejecución): en tema oscuro muestra biblioteca,
+- **App real en un emulador de tablet** (Pixel Tablet, Android 14, con capturas de pantalla reales en cada ejecución): en tema oscuro muestra biblioteca,
   editor desplazado y ajustes con títulos legibles; abre la biblioteca; escribe y pone negrita en el editor real
-  comprobando lo guardado; pega desde el portapapeles la respuesta de una IA en Markdown (llega con títulos, negrita y listas), la copia de vuelta como Markdown y abre la plantilla para tu IA; en horizontal muestra menú plegado, lista y editor, pliega la lista a pantalla completa y abre el menú completo; en vertical lista y editor se turnan
+  comprobando lo guardado; pega desde el portapapeles la respuesta de una IA en Markdown (llega con títulos, negrita y listas), la copia de vuelta como Markdown y abre la plantilla para tu IA; en horizontal muestra menú plegado, lista y editor, pliega la lista a pantalla completa y expande el menú en la zona izquierda; en vertical lista y editor se turnan
   y **deslizar sobre el discurso no abre el menú lateral**; abre los ajustes desde el menú; carga las librerías nativas de Vosk; y recorre todo el modo Talks
   (preparación → «Escuchando» → «Siguiendo» → **Marcado: Oración, Adelantar** → **modo manual** → «Seguir con la voz desde aquí» → «Improvisando» → «Fin del discurso» → resumen).
 - **No verificable sin un dispositivo físico con micrófono**: la calidad real del reconocimiento del servicio de Android/Google o de Vosk en tu tablet y con tu micrófono
   (las pruebas usan un orador simulado, no audio real), el comportamiento exacto del S Pen y de los mandos Bluetooth concretos.
   Por eso el modo Talks incluye prueba de micrófono, respaldo manual y aviso de errores. **Ensaya con tu equipo antes de un acto importante.**
 
+La sección Notas se verifica con pruebas de selección de palabras, modo automático, guardado ordenado, migración de la base de datos, copia de seguridad y citas entre segmentos. El lector JWPUB se verifica con archivos cifrados de prueba y, localmente, con la Biblia de Estudio real en español.
+
 ## Privacidad
 
-Los discursos se guardan solo en el dispositivo. El servicio de voz de Android puede enviar audio a Google para transcribirlo (como cualquier dictado del teléfono);
+Los discursos, las notas y las transcripciones se guardan solo en el dispositivo. El servicio de voz de Android puede enviar audio a Google para transcribirlo (como cualquier dictado del teléfono);
 el motor sin conexión (Vosk) no envía nada. Talks solo usa Internet para descargar el modelo de voz opcional.

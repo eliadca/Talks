@@ -8,6 +8,7 @@ import com.eliadca.talks.data.db.SpeechEntity
 import com.eliadca.talks.data.db.TalkSessionEntity
 import com.eliadca.talks.data.db.TalksDatabase
 import com.eliadca.talks.data.db.VersionEntity
+import com.eliadca.talks.data.db.NoteEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -56,6 +57,12 @@ private data class BackupSession(
 )
 
 @Serializable
+private data class BackupNote(
+    val title: String, val body: String, val transcript: String = "[]", val automatic: Boolean = false,
+    val createdAt: Long, val updatedAt: Long,
+)
+
+@Serializable
 private data class BackupFile(
     val format: Int = 1,
     val app: String = "Talks",
@@ -64,9 +71,10 @@ private data class BackupFile(
     val speeches: List<BackupSpeech>,
     val versions: List<BackupVersion> = emptyList(),
     val sessions: List<BackupSession> = emptyList(),
+    val notes: List<BackupNote> = emptyList(),
 )
 
-class BackupSummary(val speeches: Int, val folders: Int, val skipped: Int = 0)
+class BackupSummary(val speeches: Int, val folders: Int, val skipped: Int = 0, val notes: Int = 0)
 
 /** Writes every speech, folder, version and session to one JSON file, and reads it back. */
 class BackupManager(
@@ -92,11 +100,12 @@ class BackupManager(
             },
             versions = db.versions().all().map { BackupVersion(it.speechId, it.createdAt, it.title, it.body, it.wordCount, it.label) },
             sessions = db.sessions().all().map { BackupSession(it.speechId, it.startedAt, it.durationMs, it.wordsSpoken, it.wpm, it.completion, it.engine) },
+            notes = db.notes().all().map { BackupNote(it.title, it.body, it.transcript, it.automatic, it.createdAt, it.updatedAt) },
         )
         val text = json.encodeToString(BackupFile.serializer(), file)
         resolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
             ?: throw IllegalStateException("No se pudo escribir el archivo.")
-        BackupSummary(speeches.size, folders.size)
+        BackupSummary(speeches.size, folders.size, notes = file.notes.size)
     }
 
     /**
@@ -159,7 +168,15 @@ class BackupManager(
                     ),
                 )
             }
-            BackupSummary(added, newFolders, skipped)
+            val existingNotes = db.notes().all().map { it.title to it.createdAt }.toMutableSet()
+            var addedNotes = 0
+            for (n in file.notes) {
+                if (!existingNotes.add(n.title to n.createdAt)) { skipped++; continue }
+                db.notes().insert(NoteEntity(title = n.title, body = n.body, transcript = n.transcript,
+                    automatic = n.automatic, createdAt = n.createdAt, updatedAt = n.updatedAt))
+                addedNotes++
+            }
+            BackupSummary(added, newFolders, skipped, addedNotes)
         }
     }
 }

@@ -12,14 +12,15 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.printToLog
+import androidx.compose.ui.test.assertTextContains
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
@@ -400,7 +401,7 @@ class AppFlowTest {
         // The reported bug: moving through the speech opened the side menu.
         onView(isAssignableFrom(RichEditText::class.java)).perform(swipeUp(), swipeRight(), swipeDown())
         compose.waitForIdle()
-        compose.onNodeWithContentDescription("Cerrar el menú").assertIsNotDisplayed()
+        compose.onNodeWithContentDescription("Cerrar el menú").assertDoesNotExist()
         compose.onNodeWithContentDescription("Volver a la lista").performClick()
         waitForText("Charla vertical")
     }
@@ -501,6 +502,57 @@ class AppFlowTest {
         Shots.take("settings")
         compose.onNodeWithContentDescription("Volver").performClick()
         waitForText("Todos")
+    }
+
+    @Test
+    fun theMenuExpandsAtTheLeftAndNotesCaptureSpeechWithAFloatingCitation() {
+        assertTrue(forceLandscape())
+        val fake = FakeEngine()
+        container.speechEngineFactory = { fake }
+        // A tiny local test Bible; encrypted JWPUB import is exercised by JwpubBibleTest.
+        val bibleFile = java.io.File(context.filesDir, "study-bible.sqlite")
+        bibleFile.delete()
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(bibleFile, null).use { db ->
+            db.execSQL("CREATE TABLE verses (book INTEGER, chapter INTEGER, verse INTEGER, text TEXT)")
+            db.execSQL("INSERT INTO verses VALUES (43, 3, 16, 'Texto bíblico de prueba')")
+            db.execSQL("CREATE TABLE edition (title TEXT, verses INTEGER)")
+            db.execSQL("INSERT INTO edition VALUES ('Biblia de Estudio de prueba', 1)")
+        }
+        clickVisible("Menú")
+        compose.waitForIdle()
+        val rootWidth = compose.onRoot().fetchSemanticsNode().boundsInRoot.width
+        val menuWidth = compose.onNodeWithTag("left-menu").fetchSemanticsNode().boundsInRoot.width
+        assertTrue("menu must leave the main content visible", menuWidth < rootWidth * .75f)
+        Shots.take("compact-left-menu")
+        clickVisible("Notas")
+        clickVisible("Nueva nota")
+        compose.onNodeWithText("Título de la nota").performTextInput("Ideas de reunión")
+        androidx.test.espresso.Espresso.closeSoftKeyboard()
+        clickVisible("Escuchar")
+        waitForText("Escuchando")
+        fake.hear("Una idea importante para guardar", final = true)
+        waitForText("Una idea importante para guardar")
+        clickVisible("Añadir")
+        compose.onNodeWithTag("note-body").assertTextContains("Una idea importante para guardar")
+        compose.onNodeWithContentDescription("Añadir automáticamente").performClick()
+        fake.hear("Leamos Juan capítulo tres versículo dieciséis", final = true)
+        waitForText("Añadir a nota")
+        compose.onNodeWithTag("floating-citation").assertExists()
+        compose.onNodeWithText("Añadir a nota").performClick()
+        compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba")
+        Shots.take("notes-transcript-citation")
+        compose.onNodeWithContentDescription("Cerrar cita").performClick()
+        clickVisible("Pausar")
+        compose.onNodeWithContentDescription("Volver a notas").performClick()
+        waitForText("Ideas de reunión")
+        clickVisible("Ideas de reunión")
+        compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba")
+        runBlocking {
+            container.notes.flush()
+            val note = container.database.notes().all().single()
+            assertTrue(note.body.contains("Una idea importante para guardar"))
+            assertTrue(note.transcript.contains("Juan capítulo tres"))
+        }
     }
 
     @Test

@@ -6,6 +6,27 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+@Dao
+interface NoteDao {
+    @Query("SELECT id, title, substr(body, 1, 160) AS preview, updatedAt FROM notes ORDER BY updatedAt DESC")
+    fun observeAll(): Flow<List<NoteListItem>>
+
+    @Query("SELECT * FROM notes WHERE id = :id")
+    suspend fun get(id: Long): NoteEntity?
+
+    @Query("SELECT * FROM notes")
+    suspend fun all(): List<NoteEntity>
+
+    @Insert
+    suspend fun insert(note: NoteEntity): Long
+
+    @Update
+    suspend fun update(note: NoteEntity)
+
+    @Query("DELETE FROM notes WHERE id = :id")
+    suspend fun delete(id: Long)
+}
+
 private const val LIST_COLUMNS =
     "id, title, preview, wordCount, folderId, pinned, color, targetMinutes, createdAt, updatedAt, trashedAt, lastTalkAt"
 
