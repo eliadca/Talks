@@ -203,6 +203,6 @@ el motor sin conexión (Vosk) no envía nada. Talks usa Internet para descargar 
 ### IA local: fuentes y compilación
 
 - Modelo oficial [Qwen2.5-1.5B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF), revisión `91cad51170dc346986eccefdc2dd33a9da36ead9`, licencia Apache 2.0. SHA-256 del archivo Q4_K_M: `6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e`. No se incluye en el APK.
-- Runtime [llama.cpp](https://github.com/ggml-org/llama.cpp), licencia MIT, revisión fija `8bb3cf0d216a5ae48360179f2931daf284be4d01`; CMake verifica el SHA-256 del archivo fuente antes de compilar.
+- Runtime [llama.cpp](https://github.com/ggml-org/llama.cpp), licencia MIT incluida en `assets/licenses/llama.cpp-MIT.txt`, revisión fija `8bb3cf0d216a5ae48360179f2931daf284be4d01`; CMake verifica el SHA-256 del archivo fuente antes de compilar.
 - NDK `28.2.13676358`, CMake `3.22.1`, CPU arm64 y x86_64, dos hilos, contexto de 2048 tokens y bibliotecas con alineación de 16 KB. La primera compilación necesita descargar el runtime y el NDK.
 - El modelo español completo de Vosk proviene de [modelos oficiales](https://alphacephei.com/vosk/models): `vosk-model-es-0.42`, Apache 2.0; se instala aparte del modelo compacto de Discursos.
