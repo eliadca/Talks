@@ -74,11 +74,12 @@ class NoteEditorState {
     companion object {
         val Saver = androidx.compose.runtime.saveable.listSaver<NoteEditorState, Any>(
             save = { state -> listOf(state.tool.name, state.pen.name, state.pressure, state.stylusOnly, state.zoom) +
-                PenKind.entries.flatMap { listOf(state.presets.getValue(it).first, state.presets.getValue(it).second) } },
+                PenKind.entries.flatMap { listOf(state.presets.getValue(it).first, state.presets.getValue(it).second) } + listOf(state.eraserMode.name,state.eraserRadius) },
             restore = { list -> NoteEditorState().apply {
                 tool = InkTool.valueOf(list[0] as String); pen = PenKind.valueOf(list[1] as String)
                 pressure = list[2] as Boolean; stylusOnly = list[3] as Boolean; zoom = list[4] as Float
                 PenKind.entries.forEachIndexed { i, kind -> presets[kind] = (list[5 + i * 2] as Int) to (list[6 + i * 2] as Float) }
+                if(list.size>=15) {eraserMode=EraserMode.valueOf(list[13] as String);eraserRadius=list[14] as Float}
             } })
     }
 }
@@ -147,6 +148,15 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
     fun align(value: Int) {
         if(active==null)onAlign(value) else onInkChange(ink.copy(textBoxes=ink.textBoxes.map {if(it.id==active.id)it.copy(formatting=it.formatting.align(it.text,state.boxSelection.min,state.boxSelection.max,value)) else it}))
     }
+    fun list(checklist: Boolean) {
+        if(active==null) {onList(checklist);return}
+        val start=active.text.lastIndexOf('\n',(state.boxSelection.min-1).coerceAtLeast(-1))+1
+        val end=active.text.indexOf('\n',state.boxSelection.max).takeIf {it>=0} ?: active.text.length
+        val prefix=if(checklist)"☐ " else "• "
+        val rows=active.text.substring(start,end).lines();val remove=rows.all {it.startsWith(prefix)}
+        val text=active.text.replaceRange(start,end,rows.joinToString("\n") {if(remove)it.removePrefix(prefix) else prefix+it})
+        onInkChange(ink.copy(textBoxes=ink.textBoxes.map {if(it.id==active.id)it.copy(text=text,formatting=it.formatting.replace(it.text,text)) else it}))
+    }
     fun choose(tool: InkTool) { state.tool = tool; state.selected = emptySet(); if (tool != InkTool.TEXT) keyboard?.hide() }
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
         Column {
@@ -176,8 +186,8 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
                     IconButton(onClick = { align(1) }) { Icon(Icons.Filled.FormatAlignCenter, "Centrar texto") }
                     IconButton(onClick = { align(2) }) { Icon(Icons.Filled.FormatAlignRight, "Alinear a la derecha") }
                     if(active==null && !body.selection.collapsed) TextButton(onClick={val id=ink.nextId;onMoveTextSelection();state.tool=InkTool.SELECT;state.selected=setOf(id);keyboard?.hide()}) {Text("Mover selección")}
-                    IconButton(onClick = { onList(false) }) { Icon(Icons.Filled.FormatListBulleted, "Lista con viñetas") }
-                    IconButton(onClick = { onList(true) }) { Icon(Icons.Filled.Checklist, "Lista de tareas") }
+                    IconButton(onClick = { list(false) }) { Icon(Icons.Filled.FormatListBulleted, "Lista con viñetas") }
+                    IconButton(onClick = { list(true) }) { Icon(Icons.Filled.Checklist, "Lista de tareas") }
                 } else {
                     PenKind.entries.forEach { kind ->
                         IconToggleButton(state.pen == kind && state.tool == InkTool.PEN, {

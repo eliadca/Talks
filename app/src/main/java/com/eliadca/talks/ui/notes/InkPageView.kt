@@ -61,6 +61,7 @@ class InkPageView(context: Context) : View(context) {
     private var gestureColor = penColor
     private var gestureWidth = penWidth
     private var gestureTool = tool
+    private val touchDensity get() = resources.displayMetrics.density
     private val scale get() = width / document.pageWidth
 
     init { contentDescription = "Página para escribir a mano"; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
@@ -102,11 +103,11 @@ class InkPageView(context: Context) : View(context) {
         if (tool == InkTool.SELECT) {
             (selectionPreview ?: document).selectionBounds(selection)?.let { box ->
                 paint.color = ruleColor; paint.alpha = 255; paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f / scale
-                paint.pathEffect = DashPathEffect(floatArrayOf(8f / scale, 5f / scale), 0f)
-                val margin = 18f / scale
+                paint.pathEffect = DashPathEffect(floatArrayOf(8f * touchDensity / scale, 5f / scale), 0f)
+                val margin = 18f * touchDensity / scale
                 canvas.drawRect(RectF(box.left - margin, box.top - margin, box.right + margin, box.bottom + margin), paint)
                 paint.pathEffect = null; paint.style = Paint.Style.FILL
-                canvas.drawCircle(box.right + margin, box.bottom + margin, 8f / scale, paint)
+                canvas.drawCircle(box.right + margin, box.bottom + margin, 8f * touchDensity / scale, paint)
             }
         }
         if (erasing && points.isNotEmpty()) {
@@ -182,8 +183,8 @@ class InkPageView(context: Context) : View(context) {
                 if (tool == InkTool.SELECT) {
                     val p = points.first()
                     val bounds = document.selectionBounds(selection)
-                    val tolerance = 24f / scale
-                    selectionResize = bounds != null && kotlin.math.hypot(p.x - bounds.right - 18f / scale, p.y - bounds.bottom - 18f / scale) <= 14f / scale
+                    val tolerance = 24f * touchDensity / scale
+                    selectionResize = bounds != null && kotlin.math.hypot(p.x - bounds.right - 18f * touchDensity / scale, p.y - bounds.bottom - 18f * touchDensity / scale) <= 14f * touchDensity / scale
                     selectionDrag = selectionResize || (bounds != null && p.x in (bounds.left - tolerance)..(bounds.right + tolerance) && p.y in (bounds.top - tolerance)..(bounds.bottom + tolerance))
                 }
             }
@@ -237,9 +238,9 @@ class InkPageView(context: Context) : View(context) {
         if (activePointer < 0) return
         if (gestureTool == InkTool.SELECT && !selectionDrag && points.isNotEmpty()) {
             val a = points.first(); val b = points.last()
-            val chosen = if (kotlin.math.hypot(a.x - b.x, a.y - b.y) < 10f / scale) document.textBoxes.lastOrNull { a.x in it.x..(it.x + it.width) && a.y in it.y..(it.y + it.height) }?.let { setOf(it.id) }
+            val chosen = if (kotlin.math.hypot(a.x - b.x, a.y - b.y) < 10f * touchDensity / scale) document.textBoxes.lastOrNull { a.x in it.x..(it.x + it.width) && a.y in it.y..(it.y + it.height) }?.let { setOf(it.id) }
                 ?: document.bodyFrame?.takeIf { a.x in it.x..(it.x+it.width) && a.y in it.y..(it.y+it.height) }?.let { setOf(InkDocument.MAIN_TEXT_ID) }
-                ?: document.strokesHit(a, b, 14f / scale).takeLastStroke()
+                ?: document.strokesHit(a, b, 14f * touchDensity / scale).takeLastStroke()
                 else document.selectRectangle(InkBounds(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y)))
             selection = chosen; onSelectionChange(chosen)
         }

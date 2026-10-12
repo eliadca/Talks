@@ -201,6 +201,11 @@ class NotesUiTest {
         compose.onNodeWithContentDescription("Modo teclado").performClick()
         compose.onNodeWithTag("text-box-1").performTextInput(" ampliado")
         compose.runOnIdle {assertTrue(ink.textBoxes.single().text.contains("ampliado"))}
+        compose.onNodeWithTag("text-box-1").performTextInputSelection(TextRange(0,4))
+        compose.onNodeWithContentDescription("Negrita").performClick()
+        compose.runOnIdle {assertTrue(ink.textBoxes.single().formatting.styleAt(0).bold);assertTrue(ink.formatting.spans.isEmpty())}
+        compose.onNodeWithContentDescription("Lista de tareas").performClick()
+        compose.runOnIdle {assertTrue(ink.textBoxes.single().text.startsWith("☐ "))}
         screenshot("notes-movable-text")
     }
     @Test fun aLongTypedNoteExpandsTheSamePageUsedForHandwriting() {
