@@ -1,6 +1,9 @@
 package com.eliadca.talks.speech
 
 import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -15,7 +18,7 @@ import kotlin.concurrent.thread
 import kotlin.math.*
 
 /** Dedicated Notes capture: microphone meter, word confidence and alternatives, at Vosk's 16 kHz. */
-class NotesVoskSpeechEngine(@Suppress("unused") context: Context, private val directory: File) : SpeechEngine {
+class NotesVoskSpeechEngine(private val context: Context, private val directory: File) : SpeechEngine {
     override val name = "Vosk · Notas"
     private val stream=MutableSharedFlow<SpeechEvent>(replay=16,extraBufferCapacity=256,onBufferOverflow=BufferOverflow.DROP_OLDEST)
     override val events=stream.asSharedFlow()
@@ -28,6 +31,10 @@ class NotesVoskSpeechEngine(@Suppress("unused") context: Context, private val di
         worker=thread(name="notes-vosk",isDaemon=true) {
             var model: Model?=null; var recognizer: Recognizer?=null; var audio: AudioRecord?=null
             try {
+                if(ContextCompat.checkSelfPermission(context,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) {
+                    emit(SpeechEvent.Failure(EngineError(ErrorKind.PERMISSION,"Permite el acceso al micrófono para transcribir.",true)))
+                    return@thread
+                }
                 check(File(directory,"am/final.mdl").exists()) { "Instala el modelo de Vosk en Ajustes de voz de Notas." }
                 model=Model(directory.path)
                 if(!running)return@thread
