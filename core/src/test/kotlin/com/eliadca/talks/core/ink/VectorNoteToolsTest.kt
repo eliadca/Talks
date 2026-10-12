@@ -51,6 +51,14 @@ class VectorNoteToolsTest {
         assertEquals(doc.strokes[0].points.first(),smoothed.strokes[0].points.first())
         assertTrue(smoothed.strokes[0].points[1].y<doc.strokes[0].points[1].y)
     }
+    @Test fun imageOrderingChangesItsActualLayerAndKeepsOtherObjects() {
+        val doc=document().copy(images=listOf(NoteImage(3,"a"),NoteImage(4,"b",foreground=true)))
+        val front=doc.reorderInk(setOf(3L),true)
+        assertEquals(listOf(4L,3L),front.images.map {it.id});assertTrue(front.images.last().foreground)
+        val back=front.reorderInk(setOf(3L),false)
+        assertEquals(listOf(3L,4L),back.images.map {it.id});assertFalse(back.images.first().foreground)
+        assertEquals(doc.strokes,back.strokes)
+    }
     @Test fun metadataRoundTripsAndOldDocumentsOpenWithDefaults() {
         val doc=document().groupSelection(setOf(1L,2L)).copy(lockedIds=setOf(1L),hiddenIds=setOf(2L),gridVisible=true,snapToGrid=true)
         assertEquals(doc,Json.decodeFromString<InkDocument>(Json.encodeToString(doc)))

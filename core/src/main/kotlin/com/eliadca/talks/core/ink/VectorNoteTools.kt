@@ -57,7 +57,8 @@ fun InkDocument.reorderInk(requestedIds:Set<Long>,front:Boolean):InkDocument {
     val ids=requestedIds-lockedIds-hiddenIds
     val chosen=strokes.filter {it.id in ids};val rest=strokes.filterNot {it.id in ids}
     val boxes=textBoxes.filter {it.id in ids};val others=textBoxes.filterNot {it.id in ids}
-    return copy(strokes=if(front)rest+chosen else chosen+rest,textBoxes=if(front)others+boxes else boxes+others)
+    val pictures=images.filter {it.id in ids}.map {it.copy(foreground=front)};val remaining=images.filterNot {it.id in ids}
+    return copy(strokes=if(front)rest+chosen else chosen+rest,textBoxes=if(front)others+boxes else boxes+others,images=if(front)remaining+pictures else pictures+remaining)
 }
 
 fun InkStroke.allPoints():List<InkPoint> = points+contours.flatten()

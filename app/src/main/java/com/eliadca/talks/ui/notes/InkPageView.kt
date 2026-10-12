@@ -175,7 +175,7 @@ class InkPageView(context: Context) : View(context) {
     private fun drawStroke(canvas: Canvas, stroke: InkStroke) {
         val ps = stroke.points
         if (ps.isEmpty()) return
-        if(stroke.geometric || stroke.bezier || stroke.contours.isNotEmpty()) {
+        if(stroke.geometric || stroke.bezier || stroke.contours.isNotEmpty() || stroke.fillColor!=null || stroke.dashed) {
             val path=vectorPath(stroke)
             paint.pathEffect=null;paint.shader=null;paint.alpha=(stroke.opacity.coerceIn(0f,1f)*255).toInt()
             stroke.fillColor?.let {color->

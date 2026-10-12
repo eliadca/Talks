@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.eliadca.talks.core.ink.styleSelection
 import com.eliadca.talks.core.ink.InkDocument
 import com.eliadca.talks.core.ink.PenKind
 import com.eliadca.talks.core.ink.NoteTextFrame
@@ -226,7 +227,7 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
                         val color = value.toInt()
                         Box(Modifier.padding(5.dp).size(28.dp).border(if (state.color == color) 3.dp else 1.dp,
                             MaterialTheme.colorScheme.outline, CircleShape).padding(3.dp).background(Color(color), CircleShape)
-                            .clickable { state.color = color; state.tool = InkTool.PEN }
+                            .clickable { state.color = color; if(state.selected.isNotEmpty() && state.tool in listOf(InkTool.SELECT,InkTool.LASSO,InkTool.NODES))onInkChange(ink.styleSelection(state.selected,color,state.width)) else if(state.tool!=InkTool.SHAPE)state.tool = InkTool.PEN }
                             .semantics { contentDescription = "Color rápido #%06X".format(color and 0xffffff) })
                     }
                     Box(Modifier.size(48.dp).combinedClickable(onClick={choose(InkTool.ERASER)},onLongClick={choose(InkTool.ERASER);state.eraserSettings=true}).semantics {contentDescription="Goma de borrar"},contentAlignment=Alignment.Center) {Icon(Icons.Filled.Backspace,null,tint=if(state.tool==InkTool.ERASER)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)}
@@ -243,7 +244,7 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
                     if (state.selected.isNotEmpty()) {
                         if(ink.images.any {it.id in state.selected})IconButton(onClick={state.imageOptions=true}) {Icon(Icons.Filled.Crop,"Recortar y editar imagen")}
                         IconButton(onClick={state.tool=InkTool.NODES},enabled=state.selected.size==1 && ink.strokes.any {it.id in state.selected}) {Icon(Icons.Filled.EditLocationAlt,"Editar puntos del trazo")}
-                        IconButton(onClick={state.appearance=true}) {Icon(Icons.Filled.Palette,"Relleno, degradado y apariencia")}
+                        IconButton(onClick={state.appearance=true},enabled=ink.strokes.any {it.id in state.selected}) {Icon(Icons.Filled.Palette,"Relleno, degradado y apariencia")}
                         IconButton(onClick={state.transform=true}) {Icon(Icons.Filled.Transform,"Transformación precisa y estilo")}
                         if (state.selected.size == 1 && ink.textBoxes.any { it.id in state.selected }) IconButton(onClick = { state.textBoxEditor = true }) { Icon(Icons.Filled.Edit, "Editar cuadro de texto") }
                         if (InkDocument.MAIN_TEXT_ID !in state.selected) IconButton(onClick = { onInkChange(ink.duplicateSelection(state.selected)) }) { Icon(Icons.Filled.ContentCopy, "Duplicar trazos") }

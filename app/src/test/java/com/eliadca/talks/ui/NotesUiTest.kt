@@ -95,6 +95,16 @@ class NotesUiTest {
         screenshot("notes-vector-shape-template")
     }
 
+    @Test fun textSelectionDoesNotOfferVectorOnlyActionsThatCannotApply() {
+        val state=com.eliadca.talks.ui.notes.NoteEditorState().apply {tool=com.eliadca.talks.ui.notes.InkTool.SELECT;selected=setOf(InkDocument.MAIN_TEXT_ID)}
+        compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Una idea"),{},InkDocument(bodyFrame=com.eliadca.talks.core.ink.NoteTextFrame()),{},false,false,{},{},Modifier.fillMaxSize(),state=state)}}
+        compose.onNodeWithContentDescription("Relleno, degradado y apariencia").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Transformación precisa y estilo").performScrollTo().performClick()
+        compose.onNodeWithText("Color y grosor del lápiz").assertIsNotEnabled()
+        compose.onNodeWithText("Traer adelante").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Enviar atrás").assertIsNotEnabled()
+    }
+
     @Test fun imagesTemplatesAndGradientVectorsShareAFullTabletWorkspace() {
         val context=androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
         context.getSharedPreferences("notes-pencil",0).edit().putBoolean("toolbar-side",true).commit()

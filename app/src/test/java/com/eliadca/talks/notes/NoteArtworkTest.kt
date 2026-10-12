@@ -49,6 +49,19 @@ class NoteArtworkTest {
         val svg=NoteSvgExport.write(doc,"A < B & C");assertTrue(svg.contains("data:image/png;base64,"));assertTrue(svg.contains("&lt;"));assertTrue(svg.contains("&amp;"))
         DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(svg.byteInputStream())
     }
+    @Test fun fillingAnOrdinaryHandDrawnOutlineActuallyPaintsItsInterior() {
+        val stroke=rectangle(1,40f,40f,400f,400f).copy(geometric=false)
+        val view=InkPageView(ApplicationProvider.getApplicationContext()).apply {document=InkDocument(strokes=listOf(stroke));tool=InkTool.MOVE;layout(0,0,1000,1500)}
+        val bitmap=Bitmap.createBitmap(1000,1500,Bitmap.Config.ARGB_8888);val canvas=Canvas(bitmap);canvas.drawColor(Color.WHITE);view.draw(canvas)
+        assertEquals(Color.RED,bitmap.getPixel(200,200));bitmap.recycle()
+    }
+    @Test fun svgRetainsSingleInkDotsAsVisibleGeometry() {
+        val ink=InkDocument().addStroke(PenKind.BALLPOINT,Color.BLACK,8f,listOf(InkPoint(150f,240f)))
+        val svg=NoteSvgExport.write(ink,"")
+        val document=DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(svg.byteInputStream())
+        val circle=document.getElementsByTagName("circle").item(0) as org.w3c.dom.Element
+        assertEquals("150.0",circle.getAttribute("cx"));assertEquals("240.0",circle.getAttribute("cy"));assertEquals("4.0",circle.getAttribute("r"))
+    }
     @Test fun cubicBezierHasRealControlPointsAndSvgPreservesTheCurve() {
         val points=shapePoints(NoteShape.BEZIER,InkPoint(40f,40f),InkPoint(400f,400f))
         val curve=InkStroke(1,PenKind.BALLPOINT,Color.BLACK,4f,points,geometric=true,bezier=true)

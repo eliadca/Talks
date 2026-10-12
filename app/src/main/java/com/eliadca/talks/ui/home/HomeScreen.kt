@@ -264,7 +264,7 @@ fun HomeScreen(
         }
 
         var notesLibraryExpanded by rememberSaveable { mutableStateOf(true) }
-        val openNotes: () -> Unit = { notesOpen=true;notesLibraryExpanded=!notesLibraryExpanded || notes.note==null;closeMenu() }
+        val openNotes: () -> Unit = { notesLibraryExpanded=!notesOpen || !notesLibraryExpanded || notes.note==null;notesOpen=true;closeMenu() }
         val newSpeech: () -> Unit = { notesOpen = false; home.createSpeech(); closeMenu() }
         SidebarLayout(
             expanded = menuExpanded && !(notesOpen && notes.fullScreen),

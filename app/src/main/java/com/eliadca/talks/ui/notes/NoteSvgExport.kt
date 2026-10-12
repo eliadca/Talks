@@ -28,6 +28,9 @@ internal object NoteSvgExport {
         if(ink.wholePageRuled)rules(32f,32f,ink.pageWidth-32,height) else ink.areas.forEach {rules(it.left,it.top,it.right,it.bottom)}
         ink.images.filterNot {it.foreground}.forEach(::picture)
         for(s in ink.strokes)if(s.id !in ink.hiddenIds) {
+            if(s.points.size==1 && s.contours.isEmpty()) {
+                val p=s.points.single();append("<circle cx=\"${p.x}\" cy=\"${p.y}\" r=\"${s.width/2}\" fill=\"${color(s.color)}\" opacity=\"${s.opacity}\"/>");continue
+            }
             val path=buildString {(listOf(s.points)+s.contours).forEach {p->if(p.isNotEmpty()) {
                 append("M${p[0].x} ${p[0].y} ")
                 if(s.bezier && p.size>=4)for(i in 1..p.size-3 step 3)append("C${p[i].x} ${p[i].y} ${p[i+1].x} ${p[i+1].y} ${p[i+2].x} ${p[i+2].y} ")

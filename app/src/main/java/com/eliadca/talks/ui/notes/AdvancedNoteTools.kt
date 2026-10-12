@@ -56,7 +56,7 @@ internal fun AdvancedNoteTools(state:NoteEditorState,ink:InkDocument,onChange:(I
                 OutlinedTextField(scale,{scale=it},label={Text("Tamaño %")},singleLine=true)
                 TextButton(onClick={onChange(ink.transformSelection(ids,x.toFloat(),y.toFloat(),scale.toFloat()/100));x="0";y="0";scale="100"},enabled=valid && ids.isNotEmpty()) {Text("Aplicar posición y tamaño")}
                 Row {TextButton(onClick={val b=ink.selectionBounds(ids);if(b!=null)onChange(ink.transformSelection(ids,dx=(ink.pageWidth-(b.right-b.left))/2-b.left))},enabled=ids.isNotEmpty()) {Text("Centrar")}
-                    TextButton(onClick={onChange(ink.styleSelection(ids,state.color,state.width))},enabled=ids.isNotEmpty()) {Text("Color y grosor del lápiz")}}
+                    TextButton(onClick={onChange(ink.styleSelection(ids,state.color,state.width))},enabled=ink.strokes.any {it.id in ids} || ink.textBoxes.any {it.id in ids}) {Text("Color y grosor del lápiz")}}
                 Text("Usa el color y grosor actuales del lápiz para cambiar la selección.",style=MaterialTheme.typography.bodySmall)
                 if(ids.size>1) {
                     Text("Alinear objetos",style=MaterialTheme.typography.titleSmall)
@@ -70,8 +70,8 @@ internal fun AdvancedNoteTools(state:NoteEditorState,ink:InkDocument,onChange:(I
                     TextButton(onClick={onChange(ink.smoothInk(ids))}) {Text("Suavizar trazo")}
                 }
                 Row {TextButton(onClick={onChange(ink.groupSelection(ids))},enabled=ids.size>1) {Text("Agrupar")};TextButton(onClick={onChange(ink.ungroupSelection(ids))}) {Text("Desagrupar")}}
-                Row {TextButton(onClick={onChange(ink.reorderInk(ids,true))}) {Text("Traer adelante")};TextButton(onClick={onChange(ink.reorderInk(ids,false))}) {Text("Enviar atrás")}}
-                Text("El orden se aplica entre trazos o entre cuadros de texto. El texto permanece encima de la tinta.",style=MaterialTheme.typography.bodySmall)
+                Row {TextButton(onClick={onChange(ink.reorderInk(ids,true))},enabled=ids.any {it!=InkDocument.MAIN_TEXT_ID}) {Text("Traer adelante")};TextButton(onClick={onChange(ink.reorderInk(ids,false))},enabled=ids.any {it!=InkDocument.MAIN_TEXT_ID}) {Text("Enviar atrás")}}
+                Text("El texto queda encima de la tinta. Las imágenes también pueden ponerse detrás o delante de los trazos.",style=MaterialTheme.typography.bodySmall)
             }
         },confirmButton={TextButton(onClick={state.transform=false}) {Text("Listo")}})
     }
