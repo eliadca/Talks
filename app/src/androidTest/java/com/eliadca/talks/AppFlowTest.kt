@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -24,6 +25,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -73,10 +75,11 @@ import org.junit.runner.RunWith
 
 /** Drives the real app on an emulator: library, editor, tablet layout and Talks mode. */
 @RunWith(AndroidJUnit4::class)
+@OptIn(androidx.compose.ui.test.ExperimentalTestApi::class)
 class AppFlowTest {
 
     @get:Rule(order = 0)
-    val permission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO)
+    val permission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
 
     @get:Rule(order = 1)
     val compose = createAndroidComposeRule<MainActivity>()
@@ -121,9 +124,11 @@ class AppFlowTest {
 
     @Before
     fun prepare() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { container.noteWorkspace.pause(); container.noteWorkspace.backToList(); container.noteWorkspace.consumeNavigationRequest() }
         runBlocking(Dispatchers.IO) {
             // Wait for the first-launch sample content, then start from an empty library.
             withTimeout(20_000) { while (!container.settings.settings.first().seeded) delay(100) }
+            container.notes.flush()
             container.database.clearAllTables()
             container.settings.update { AppSettings(seeded = true, templateSeeded = true, engine = EngineKind.ANDROID) }
         }
@@ -134,6 +139,8 @@ class AppFlowTest {
 
     @After
     fun cleanUp() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { container.noteWorkspace.pause() }
+        runBlocking { container.notes.flush() }
         container.speechEngineFactory = null
         InstrumentationRegistry.getInstrumentation().uiAutomation.setRotation(UiAutomation.ROTATION_UNFREEZE)
     }
@@ -534,7 +541,7 @@ class AppFlowTest {
         Shots.take("compact-left-menu")
         clickVisible("Notas")
         clickVisible("Nueva nota")
-        compose.onNodeWithText("Título de la nota").performTextInput("Ideas de reunión")
+        compose.onNodeWithTag("note-title").performTextInput("Ideas de reunión")
         androidx.test.espresso.Espresso.closeSoftKeyboard()
         compose.onNodeWithTag("voice-panel").assertDoesNotExist()
         compose.onNodeWithContentDescription("Abrir transcripción").performClick()
@@ -554,7 +561,7 @@ class AppFlowTest {
         compose.onNodeWithContentDescription("Cerrar cita").performClick()
         clickVisible("Pausar")
         compose.onNodeWithContentDescription("Cerrar transcripción").performClick()
-        compose.onNodeWithText("Lápiz").performClick()
+        compose.onNodeWithContentDescription("Modo lápiz").performClick()
         compose.onNodeWithTag("ink-page").performTouchInput {
             swipe(androidx.compose.ui.geometry.Offset(100f, 100f), androidx.compose.ui.geometry.Offset(320f, 180f), 300)
         }
@@ -590,6 +597,60 @@ class AppFlowTest {
             val ink = kotlinx.serialization.json.Json.decodeFromString<com.eliadca.talks.core.ink.InkDocument>(note.ink)
             assertEquals(1, ink.strokes.size)
         }
+    }
+
+    @Test
+    fun notesHaveRichTextAndFullscreenAndCaptureContinuesWhileTheActivityIsMinimized() {
+        assertTrue(forceLandscape())
+        val fake = FakeEngine(); container.speechEngineFactory = { fake }
+        clickVisible("Menú"); clickVisible("Notas"); clickVisible("Nueva nota")
+        compose.onNodeWithTag("note-title").performTextInput("Notas para tablet")
+        compose.onNodeWithTag("note-body").performTextInput("Una idea con formato")
+        androidx.test.espresso.Espresso.closeSoftKeyboard()
+        compose.onNodeWithTag("note-body").performTextInputSelection(androidx.compose.ui.text.TextRange(4, 8))
+        compose.onNodeWithContentDescription("Negrita").performClick()
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        compose.onNodeWithTag("note-body").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue(layouts.single().layoutInput.text.spanStyles.any { it.start == 4 && it.end == 8 && it.item.fontWeight == androidx.compose.ui.text.font.FontWeight.Bold })
+        compose.onNodeWithContentDescription("Pantalla completa de notas").performClick()
+        compose.onNodeWithTag("left-menu").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Salir de pantalla completa").performClick()
+        compose.onNodeWithTag("left-menu").assertExists()
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        clickVisible("Escuchar"); waitForText("Escuchando")
+        // Exercise the actual microphone foreground-service lifecycle with a deterministic engine.
+        compose.runOnUiThread { com.eliadca.talks.ui.notes.NotesRecordingService.start(context, container.noteWorkspace) }
+        compose.waitUntil(10000) { shell("dumpsys activity services com.eliadca.talks.debug").contains("NotesRecordingService") }
+        fake.hear("Primera frase de la grabación", final = true); waitForText("Primera frase de la grabación")
+        compose.onNodeWithContentDescription("Cerrar transcripción").performClick()
+        fake.hear("La transcripción sigue con el panel cerrado", final = true)
+        compose.waitUntil(10000) { container.noteWorkspace.entries.size == 2 }
+        compose.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        fake.hear("Sigue escuchando con la app minimizada", final = true)
+        compose.waitUntil(10000) { container.noteWorkspace.entries.size == 3 }
+        assertTrue(container.noteWorkspace.listening)
+        compose.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+        compose.waitUntil(10000) { compose.activity.hasWindowFocus() }
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        waitForText("Sigue escuchando con la app minimizada")
+        val notification = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.single { it.id == 41 }
+        compose.onNodeWithContentDescription("Volver a notas").performClick()
+        notification.notification.contentIntent.send()
+        compose.waitUntil(10000) { compose.onAllNodesWithTag("note-title").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("note-title").assertTextContains("Notas para tablet")
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        notification.notification.actions.single().actionIntent.send()
+        compose.waitUntil(10000) { !container.noteWorkspace.listening }
+        waitForText("Escuchar")
+        compose.runOnUiThread { container.noteWorkspace.flushEdits() }
+        runBlocking {
+            container.notes.flush()
+            val note = container.database.notes().all().single()
+            assertTrue(note.transcript.contains("app minimizada"))
+            val ink = kotlinx.serialization.json.Json.decodeFromString<com.eliadca.talks.core.ink.InkDocument>(note.ink)
+            assertTrue(ink.formatting.styleAt(5).bold)
+        }
+        Shots.take("notes-tablet-editor")
     }
 
     @Test

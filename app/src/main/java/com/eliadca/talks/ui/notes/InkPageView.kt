@@ -6,14 +6,19 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.DashPathEffect
+import com.eliadca.talks.core.ink.InkBounds
 import android.view.MotionEvent
 import android.view.View
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.text.Layout
 import com.eliadca.talks.core.ink.InkDocument
 import com.eliadca.talks.core.ink.InkPoint
 import com.eliadca.talks.core.ink.InkStroke
 import com.eliadca.talks.core.ink.PenKind
 
-enum class InkTool { TEXT, PEN, ERASER, MOVE, RULE_AREA }
+enum class InkTool { TEXT, PEN, ERASER, MOVE, SELECT, RULE_AREA }
 
 /** Native input retains stylus pressure and coalesced samples, and rejects palms during a stylus stroke. */
 class InkPageView(context: Context) : View(context) {
@@ -28,9 +33,17 @@ class InkPageView(context: Context) : View(context) {
     var ruleColor = Color.rgb(165, 181, 201)
     var onChange: (InkDocument) -> Unit = {}
     var onAreaFinished: () -> Unit = {}
+    var selection: Set<Long> = emptySet()
+        set(value) { if (field != value) { field = value; invalidate() } }
+    var onSelectionChange: (Set<Long>) -> Unit = {}
+    private var selectionDrag = false
+    private var selectionResize = false
+    private var selectionPreview: InkDocument? = null
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private data class RenderedStroke(val stroke: InkStroke, val bounds: RectF, val paths: Map<Int, Path>)
     private val rendered = mutableMapOf<Long, RenderedStroke>()
+    private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private val textLayouts = mutableMapOf<Long, Pair<com.eliadca.talks.core.ink.NoteTextBox, StaticLayout>>()
     private var activePointer = -1
     private var activeStylus = false
     private var erasing = false
@@ -40,7 +53,7 @@ class InkPageView(context: Context) : View(context) {
     private var gestureColor = penColor
     private var gestureWidth = penWidth
     private var gestureTool = tool
-    private val scale get() = width / InkDocument.PAGE_WIDTH
+    private val scale get() = width / document.pageWidth
 
     init { contentDescription = "Página para escribir a mano"; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
@@ -55,18 +68,37 @@ class InkPageView(context: Context) : View(context) {
             var y = top + spacing
             while (y <= bottom) { canvas.drawLine(left, y, right, y, paint); y += spacing }
         }
-        if (document.wholePageRuled) lines(32f, 32f, InkDocument.PAGE_WIDTH - 32, height / scale)
+        if (document.wholePageRuled) lines(32f, 32f, document.pageWidth - 32, height / scale)
         else document.areas.forEach { lines(it.left, it.top, it.right, it.bottom) }
         val existing = document.strokes.map { it.id }.toSet()
         rendered.keys.retainAll(existing)
-        document.strokes.filterNot { it.id in erased }.forEach { drawStroke(canvas, it) }
+        (selectionPreview ?: document).strokes.filterNot { it.id in erased }.forEach { drawStroke(canvas, it) }
+        val boxes = (selectionPreview ?: document).textBoxes
+        textLayouts.keys.retainAll(boxes.map { it.id }.toSet())
+        boxes.forEach { box ->
+            val layout = textLayouts[box.id]?.takeIf { it.first == box }?.second ?: run {
+                val p = TextPaint(textPaint).apply { textSize = box.size; color = box.color }
+                StaticLayout.Builder.obtain(box.text, 0, box.text.length, p, box.width.toInt().coerceAtLeast(1))
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false).build().also { textLayouts[box.id] = box to it }
+            }
+            canvas.save(); canvas.translate(box.x, box.y); layout.draw(canvas); canvas.restore()
+        }
         if (points.isNotEmpty() && !erasing && gestureTool == InkTool.PEN) {
             drawStroke(canvas, InkStroke(0, gesturePen, gestureColor, gestureWidth, points))
         }
-        if (points.isNotEmpty() && gestureTool == InkTool.RULE_AREA) {
+        if (points.isNotEmpty() && (gestureTool == InkTool.RULE_AREA || (gestureTool == InkTool.SELECT && !selectionDrag))) {
             val a = points.first(); val b = points.last()
             paint.color = ruleColor; paint.alpha = 220; paint.strokeWidth = 3f; paint.style = Paint.Style.STROKE
             canvas.drawRect(RectF(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y)), paint)
+        }
+        if (tool == InkTool.SELECT) {
+            (selectionPreview ?: document).selectionBounds(selection)?.let { box ->
+                paint.color = ruleColor; paint.alpha = 255; paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f / scale
+                paint.pathEffect = DashPathEffect(floatArrayOf(8f / scale, 5f / scale), 0f)
+                canvas.drawRect(RectF(box.left - 10, box.top - 10, box.right + 10, box.bottom + 10), paint)
+                paint.pathEffect = null; paint.style = Paint.Style.FILL
+                canvas.drawCircle(box.right + 10, box.bottom + 10, 8f / scale, paint)
+            }
         }
         canvas.restore()
     }
@@ -126,7 +158,7 @@ class InkPageView(context: Context) : View(context) {
                 val index = event.actionIndex
                 val kind = event.getToolType(index)
                 activeStylus = kind == MotionEvent.TOOL_TYPE_STYLUS || kind == MotionEvent.TOOL_TYPE_ERASER
-                if (stylusOnly && !activeStylus) return false
+                if (stylusOnly && !activeStylus && tool == InkTool.PEN) return false
                 activePointer = event.getPointerId(index)
                 gestureTool = tool; gesturePen = pen; gestureWidth = penWidth; gestureColor = penColor
                 erasing = tool == InkTool.ERASER || kind == MotionEvent.TOOL_TYPE_ERASER ||
@@ -134,6 +166,13 @@ class InkPageView(context: Context) : View(context) {
                 points.clear(); erased = emptySet()
                 parent?.requestDisallowInterceptTouchEvent(true)
                 sample(event, index)
+                if (tool == InkTool.SELECT) {
+                    val p = points.first()
+                    val bounds = document.selectionBounds(selection)
+                    val tolerance = 24f / scale
+                    selectionResize = bounds != null && kotlin.math.hypot(p.x - bounds.right - 10, p.y - bounds.bottom - 10) <= tolerance
+                    selectionDrag = selectionResize || (bounds != null && p.x in (bounds.left - tolerance)..(bounds.right + tolerance) && p.y in (bounds.top - tolerance)..(bounds.bottom + tolerance))
+                }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 if (!activeStylus) { cancelGesture(); parent?.requestDisallowInterceptTouchEvent(false) }
@@ -151,7 +190,7 @@ class InkPageView(context: Context) : View(context) {
                 sample(event, event.actionIndex)
                 finishGesture(); performClick()
             }
-            MotionEvent.ACTION_CANCEL -> { finishGesture() }
+            MotionEvent.ACTION_CANCEL -> { cancelGesture() }
         }
         invalidate()
         return true
@@ -163,14 +202,30 @@ class InkPageView(context: Context) : View(context) {
         val pressure = if (activeStylus && usePressure) {
             if (history < 0) event.getPressure(index) else event.getHistoricalPressure(index, history)
         } else .5f
-        val point = InkPoint((x / scale).coerceIn(0f, InkDocument.PAGE_WIDTH), (y / scale).coerceAtLeast(0f), pressure.coerceIn(0f, 1f))
+        val point = InkPoint((x / scale).coerceIn(0f, document.pageWidth), (y / scale).coerceAtLeast(0f), pressure.coerceIn(0f, 1f))
         if (erasing) erased = erased + document.strokesHit(points.lastOrNull() ?: point, point, maxOf(18f, gestureWidth * 3))
         points.add(point)
+        if (gestureTool == InkTool.SELECT && selectionDrag && points.size > 1) {
+            val origin = points.first()
+            val bounds = document.selectionBounds(selection)
+            selectionPreview = if (selectionResize && bounds != null) {
+                val initial = kotlin.math.hypot(origin.x - bounds.left, origin.y - bounds.top).coerceAtLeast(1f)
+                document.transformSelection(selection, factor = kotlin.math.hypot(point.x - bounds.left, point.y - bounds.top) / initial)
+            } else document.transformSelection(selection, point.x - origin.x, point.y - origin.y)
+        }
     }
 
     private fun finishGesture() {
         if (activePointer < 0) return
+        if (gestureTool == InkTool.SELECT && !selectionDrag && points.isNotEmpty()) {
+            val a = points.first(); val b = points.last()
+            val chosen = if (kotlin.math.hypot(a.x - b.x, a.y - b.y) < 10f / scale) document.textBoxes.lastOrNull { a.x in it.x..(it.x + it.width) && a.y in it.y..(it.y + it.height) }?.let { setOf(it.id) }
+                ?: document.strokesHit(a, b, 14f / scale).takeLastStroke()
+                else document.selectRectangle(InkBounds(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y)))
+            selection = chosen; onSelectionChange(chosen)
+        }
         val updated = when {
+            gestureTool == InkTool.SELECT -> selectionPreview ?: document
             erasing -> document.copy(strokes = document.strokes.filterNot { it.id in erased })
             gestureTool == InkTool.RULE_AREA && points.isNotEmpty() -> document.addArea(points.first(), points.last())
             gestureTool == InkTool.PEN -> document.addStroke(gesturePen, gestureColor, gestureWidth, points.toList())
@@ -183,9 +238,11 @@ class InkPageView(context: Context) : View(context) {
     }
 
     private fun cancelGesture() {
-        activePointer = -1; points.clear(); erased = emptySet()
+        activePointer = -1; points.clear(); erased = emptySet(); selectionPreview = null; selectionDrag = false; selectionResize = false
         parent?.requestDisallowInterceptTouchEvent(false); invalidate()
     }
+
+    private fun Set<Long>.takeLastStroke() = document.strokes.lastOrNull { it.id in this }?.let { setOf(it.id) } ?: emptySet()
 
     override fun performClick(): Boolean { super.performClick(); return true }
     override fun onDetachedFromWindow() { finishGesture(); super.onDetachedFromWindow() }

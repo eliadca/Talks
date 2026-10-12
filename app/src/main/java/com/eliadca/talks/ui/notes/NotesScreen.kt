@@ -1,6 +1,24 @@
 package com.eliadca.talks.ui.notes
 
 import android.Manifest
+import android.os.Build
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.platform.LocalDensity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.eliadca.talks.ui.findActivity
+import kotlin.math.roundToInt
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -66,18 +84,39 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val notes by vm.items.collectAsState()
     val saveError by vm.saveError.collectAsState()
+    var citationAnchor by remember { mutableStateOf<Rect?>(null) }
+    var exportText by remember { mutableStateOf("") }
     var bibleOptions by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf<NoteListItem?>(null) }
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    fun startListening() {
+        vm.start()
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        uri?.let { vm.exportTranscript(it, exportText) }
+    }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) vm.start() else vm.permissionDenied()
+        if (granted) startListening() else vm.permissionDenied()
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importBible) }
     DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) vm.pause() }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) vm.flushEdits() }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer); vm.pause() }
+        onDispose { lifecycle.removeObserver(observer); vm.flushEdits() }
     }
     BackHandler(enabled = vm.note != null && allowBack) { vm.backToList() }
+    BackHandler(enabled = vm.fullScreen && allowBack) { vm.fullScreen = false }
+    DisposableEffect(vm.fullScreen) {
+        val window = context.findActivity()?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        if (vm.fullScreen) {
+            controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) }
+    }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val wide = maxWidth >= 760.dp
@@ -88,14 +127,31 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
                         if (vm.note == null) "Abrir el menú" else "Volver a notas")
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("Notas", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    if (vm.note == null) Text("Notas", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    else BasicTextField(vm.note!!.title, vm::title, singleLine = true,
+                        textStyle = MaterialTheme.typography.titleLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold),
+                        modifier = Modifier.fillMaxWidth().testTag("note-title").semantics { contentDescription = "Título de la nota" },
+                        decorationBox = { field -> Box { if (vm.note!!.title.isEmpty()) Text("Sin título", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant); field() } })
                     Text(if (vm.note == null) "Escucha, elige y guarda tus ideas" else if (saveError == null) "Guardado automático" else "Pendiente de guardar",
-                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (vm.note != null) IconButton(onClick = { vm.fullScreen = !vm.fullScreen }) {
+                    Icon(if (vm.fullScreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, if (vm.fullScreen) "Salir de pantalla completa" else "Pantalla completa de notas")
                 }
                 IconButton(onClick = { bibleOptions = true }) { Icon(Icons.Filled.MenuBook, "Biblia de Estudio") }
                 if (vm.note == null) {
                     FilledTonalButton(onClick = vm::create, enabled = !vm.loading) {
                         Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Nueva nota")
+                    }
+                }
+            }
+            if (vm.listening && (vm.note == null || vm.note?.id != vm.recordingNoteId)) {
+                Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Mic, null, Modifier.size(18.dp))
+                        Text("Transcribiendo en ${vm.recordingTitle}", Modifier.weight(1f).padding(8.dp), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                        TextButton(onClick = { vm.recordingNoteId?.let(vm::open) }) { Text("Ver") }
+                        TextButton(onClick = vm::pause) { Text("Pausar") }
                     }
                 }
             }
@@ -105,30 +161,34 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
             if (vm.note == null) {
                 NoteLibrary(notes, vm::open, { delete = it }, Modifier.weight(1f))
             } else {
-                OutlinedTextField(value = vm.note!!.title, onValueChange = vm::title, label = { Text("Título de la nota") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
                 key(vm.note!!.id) {
                     NotesWorkspace(entries = vm.entries, partial = vm.partial, body = vm.body,
                         automatic = vm.note!!.automatic, wide = wide, onEdit = vm::edit, onAdd = vm::addEntries, onInsert = vm::insert,
                         ink = vm.ink, onInkChange = vm::editInk, canUndoInk = vm.canUndoInk, canRedoInk = vm.canRedoInk,
                         onUndoInk = vm::undoInk, onRedoInk = vm::redoInk,
-                        listening = vm.listening, engineState = vm.engineState, level = vm.level, onAuto = vm::automatic,
-                        onReference = { if (vm.bible == null) bibleOptions = true else vm.showReference(it) },
+                        listening = vm.listening && vm.note?.id == vm.recordingNoteId, engineState = vm.engineState, level = vm.level, onAuto = vm::automatic,
+                        onReference = { citationAnchor = null; if (vm.bible == null) bibleOptions = true else vm.showReference(it) },
+                        onAnchorChanged = { citationAnchor = it },
+                        onReferenceAt = { ref, anchor -> citationAnchor = anchor; if (vm.bible == null) bibleOptions = true else vm.showReference(ref) },
+                        onFormat = vm::formatText, textStyle = vm.currentTextStyle, onAlign = vm::alignText, onList = vm::listText,
+                        canUndoText = vm.canUndoText, canRedoText = vm.canRedoText, onUndoText = vm::undoText, onRedoText = vm::redoText,
+                        onExport = {
+                            exportText = vm.exportTranscript()
+                            exporter.launch(vm.note!!.title.ifBlank { "Nota" }.replace(Regex("[\\/:*?\"<>|]"), "_") + "_transcripcion.txt")
+                        },
                         references = vm.detected, suggestions = vm.referenceSuggestions,
                         allowBack = allowBack,
                         onToggleListen = {
-                            if (vm.listening) vm.pause()
-                            else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.start()
+                            if (vm.listening) { if (vm.recordingNoteId == vm.note?.id) vm.pause() else vm.recordingNoteId?.let(vm::open) }
+                            else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startListening()
                             else permission.launch(Manifest.permission.RECORD_AUDIO)
                         },
-                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                        modifier = Modifier.weight(1f))
                 }
             }
         }
         vm.passage?.let { passage ->
-            FloatingPassage(passage, vm.passageExpanded, vm::expandPassage, vm::dismissPassage, vm::addPassage,
-                modifier = Modifier.align(Alignment.BottomStart).padding(start = 16.dp, end = 16.dp, bottom = 88.dp)
-                    .width(minOf(420.dp, maxWidth - 32.dp)))
+            CitationThought(passage, if (vm.passageIsFromVoice) null else citationAnchor, vm.passageExpanded, vm::expandPassage, vm::dismissPassage, vm::addPassage)
         }
     }
 
@@ -203,7 +263,9 @@ private fun NoteLibrary(notes: List<NoteListItem>, onOpen: (Long) -> Unit, onDel
     }
 }
 
-/** The page stays central; voice lives in a right-hand panel opened explicitly by its microphone. */
+private enum class VoiceDock(val label: String) { RIGHT("Derecha"), BOTTOM("Debajo de la nota"), TOP("Encima de la nota"), FLOATING("Flotante sobre la nota") }
+
+/** Editing tools span the top. The audio panel docks, resizes or floats independently of capture. */
 @Composable
 fun NotesWorkspace(
     entries: List<TranscriptEntry>, partial: String, body: TextFieldValue, automatic: Boolean, wide: Boolean,
@@ -212,54 +274,136 @@ fun NotesWorkspace(
     canUndoInk: Boolean = false, canRedoInk: Boolean = false, onUndoInk: () -> Unit = {}, onRedoInk: () -> Unit = {},
     listening: Boolean = false, engineState: EngineState = EngineState.IDLE, level: Float = 0f,
     onAuto: (Boolean) -> Unit = {}, onToggleListen: () -> Unit = {}, onReference: (BibleReference) -> Unit = {},
-    references: List<BibleReference> = emptyList(), suggestions: List<BibleReferenceSuggestion> = emptyList(),
-    allowBack: Boolean = true,
+    references: List<BibleReference> = emptyList(), suggestions: List<BibleReferenceSuggestion> = emptyList(), allowBack: Boolean = true,
+    onReferenceAt: ((BibleReference, Rect) -> Unit)? = null, onAnchorChanged: (Rect) -> Unit = {},
+    onFormat: ((com.eliadca.talks.core.notes.NoteTextStyle) -> com.eliadca.talks.core.notes.NoteTextStyle) -> Unit = {},
+    textStyle: com.eliadca.talks.core.notes.NoteTextStyle = com.eliadca.talks.core.notes.NoteTextStyle(),
+    onAlign: (Int) -> Unit = {}, onList: (Boolean) -> Unit = {}, canUndoText: Boolean = false, canRedoText: Boolean = false,
+    onUndoText: () -> Unit = {}, onRedoText: () -> Unit = {}, onExport: () -> Unit = {},
 ) {
     var panelOpen by rememberSaveable { mutableStateOf(false) }
+    var dock by rememberSaveable { mutableStateOf(VoiceDock.RIGHT) }
+    var requestedWidth by rememberSaveable { mutableFloatStateOf(420f) }
+    var requestedHeight by rememberSaveable { mutableFloatStateOf(380f) }
+    var floatingX by rememberSaveable { mutableFloatStateOf(.7f) }
+    var floatingY by rememberSaveable { mutableFloatStateOf(.15f) }
+    var sizeDialog by remember { mutableStateOf(false) }
+    val editorState = rememberNoteEditorState()
     val keyboard = LocalSoftwareKeyboardController.current
+    val density = LocalDensity.current
     BackHandler(panelOpen && allowBack) { panelOpen = false }
-    BoxWithConstraints(modifier.fillMaxSize().imePadding()) {
-        val panelWidth = if (wide) minOf(420.dp, maxWidth * .4f) else minOf(420.dp, maxWidth - 20.dp)
-        @Composable fun voicePanel(panelModifier: Modifier) {
-            Surface(panelModifier.testTag("voice-panel"), shape = RoundedCornerShape(22.dp), shadowElevation = 12.dp,
-                color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                Column {
-                    TranscriptPanel(entries, partial, automatic, onAdd, onInsert, Modifier.weight(1f).fillMaxWidth(),
-                        onClose = { panelOpen = false }, references = references, suggestions = suggestions, onReference = onReference)
-                    MicrophoneBar(listening, engineState, automatic, level, onAuto, onToggleListen)
+    Column(modifier.fillMaxSize().imePadding()) {
+        NoteEditorToolbar(editorState, body, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk,
+            onFormat, textStyle, onAlign, onList, canUndoText, canRedoText, onUndoText, onRedoText)
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val availableWidth = maxWidth.value; val availableHeight = maxHeight.value
+            val panelWidth = requestedWidth.coerceIn(minOf(280f, availableWidth), if (wide && dock == VoiceDock.RIGHT) maxOf(280f, availableWidth - 280f) else availableWidth)
+            val panelHeight = requestedHeight.coerceIn(minOf(260f, availableHeight),
+                if (dock == VoiceDock.TOP || dock == VoiceDock.BOTTOM) maxOf(minOf(260f, availableHeight), availableHeight - 120f) else availableHeight)
+            @Composable fun page(pageModifier: Modifier) {
+                HandwritingNotePanel(body, onEdit, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk,
+                    pageModifier, onReference, editorState, showToolbar = false, onReferenceAt = onReferenceAt, onAnchorChanged = onAnchorChanged)
+            }
+            @Composable fun voicePanel(panelModifier: Modifier) {
+                Surface(panelModifier.testTag("voice-panel"), shape = RoundedCornerShape(18.dp), shadowElevation = 12.dp,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    BoxWithConstraints {
+                        val compact = maxHeight < 380.dp
+                        Column {
+                            TranscriptPanel(entries, partial, automatic, onAdd, onInsert, Modifier.weight(1f).fillMaxWidth(),
+                                onClose = { panelOpen = false }, references = references, suggestions = suggestions, onReference = onReference,
+                                onExport = onExport, compact = compact, dock = dock, onDock = { dock = it }, onResize = { sizeDialog = true },
+                                dragHandle = Modifier.pointerInput(dock, availableWidth, availableHeight, panelWidth, panelHeight) {
+                                    if (dock == VoiceDock.FLOATING) detectDragGestures { change, delta ->
+                                        change.consume()
+                                        floatingX = (floatingX + delta.x / density.density / maxOf(1f, availableWidth - panelWidth)).coerceIn(0f, 1f)
+                                        floatingY = (floatingY + delta.y / density.density / maxOf(1f, availableHeight - panelHeight)).coerceIn(0f, 1f)
+                                    }
+                                })
+                            MicrophoneBar(listening, engineState, automatic, level, onAuto, onToggleListen, compact)
+                        }
+                        Box(Modifier.align(Alignment.BottomEnd).size(24.dp).pointerInput(availableWidth, availableHeight, dock) {
+                            detectDragGestures { change, delta ->
+                                change.consume(); requestedWidth = (requestedWidth + delta.x / density.density).coerceIn(minOf(280f, availableWidth), availableWidth)
+                                requestedHeight = (requestedHeight + delta.y / density.density).coerceIn(minOf(260f, availableHeight), availableHeight)
+                            }
+                        }.semantics { contentDescription = "Arrastrar para cambiar tamaño del panel" }) {
+                            Icon(Icons.Filled.DragHandle, null, Modifier.align(Alignment.Center), tint = MaterialTheme.colorScheme.outline)
+                        }
+                    }
                 }
             }
-        }
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HandwritingNotePanel(body, onEdit, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk,
-                Modifier.weight(1f).fillMaxHeight().padding(bottom = if (panelOpen) 0.dp else 76.dp), onReference = onReference)
-            if (wide && panelOpen) voicePanel(Modifier.width(panelWidth).fillMaxHeight())
-        }
-        if (!wide) {
-            AnimatedVisibility(panelOpen, modifier = Modifier.align(Alignment.CenterEnd),
-                enter = slideInHorizontally { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut()) {
-                voicePanel(Modifier.width(panelWidth).fillMaxHeight())
+            val dockedHorizontal = panelOpen && dock in listOf(VoiceDock.TOP, VoiceDock.BOTTOM)
+            if (dockedHorizontal) {
+                Column(Modifier.fillMaxSize()) {
+                    if (dock == VoiceDock.TOP) voicePanel(Modifier.fillMaxWidth().height(panelHeight.dp))
+                    if (dock == VoiceDock.TOP) ResizeHandle(false) { delta -> requestedHeight = (panelHeight + delta).coerceIn(minOf(260f, availableHeight), maxOf(260f, availableHeight - 120)) }
+                    page(Modifier.weight(1f).fillMaxWidth())
+                    if (dock == VoiceDock.BOTTOM) ResizeHandle(false) { delta -> requestedHeight = (panelHeight - delta).coerceIn(minOf(260f, availableHeight), maxOf(260f, availableHeight - 120)) }
+                    if (dock == VoiceDock.BOTTOM) voicePanel(Modifier.fillMaxWidth().height(panelHeight.dp))
+                }
+            } else {
+                Row(Modifier.fillMaxSize()) {
+                    page(Modifier.weight(1f).fillMaxHeight())
+                    if (panelOpen && wide && dock == VoiceDock.RIGHT) {
+                        ResizeHandle(true) { delta -> requestedWidth = (panelWidth - delta).coerceIn(280f, maxOf(280f, availableWidth - 280)) }
+                        voicePanel(Modifier.width(panelWidth.dp).fillMaxHeight())
+                    }
+                }
+                if (panelOpen && (!wide && dock == VoiceDock.RIGHT || dock == VoiceDock.FLOATING)) {
+                    val floating = dock == VoiceDock.FLOATING
+                    voicePanel(if (floating) Modifier.offset(x = ((availableWidth - panelWidth) * floatingX).dp, y = ((availableHeight - panelHeight) * floatingY).dp)
+                        .width(panelWidth.dp).height(panelHeight.dp)
+                        else Modifier.align(Alignment.CenterEnd).width(panelWidth.dp).fillMaxHeight())
+                }
             }
-        }
-        if (!panelOpen) {
-            FloatingActionButton(onClick = { keyboard?.hide(); panelOpen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+            if (!panelOpen) FloatingActionButton(onClick = { keyboard?.hide(); panelOpen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
                 .semantics { stateDescription = if (listening) "Escuchando" else "Micrófono pausado" },
                 shape = RoundedCornerShape(22.dp), containerColor = MaterialTheme.colorScheme.primary) {
                 Box {
-                    Icon(painterResource(R.drawable.ic_note_microphone), "Abrir transcripción", Modifier.size(36.dp), tint = androidx.compose.ui.graphics.Color.Unspecified)
-                    if (listening) Box(Modifier.align(Alignment.TopEnd).size(8.dp)
-                        .background(MaterialTheme.colorScheme.tertiary, androidx.compose.foundation.shape.CircleShape))
+                    Icon(painterResource(R.drawable.ic_note_microphone), "Abrir transcripción", Modifier.size(36.dp), tint = Color.Unspecified)
+                    if (listening) Box(Modifier.align(Alignment.TopEnd).size(8.dp).background(MaterialTheme.colorScheme.tertiary, androidx.compose.foundation.shape.CircleShape))
                 }
             }
+            if (sizeDialog) AlertDialog(onDismissRequest = { sizeDialog = false }, title = { Text("Tamaño del panel de voz") }, text = {
+                Column {
+                    if (dock == VoiceDock.RIGHT || dock == VoiceDock.FLOATING) {
+                        Text("Ancho: ${panelWidth.toInt()}")
+                        Slider(panelWidth, { requestedWidth = it }, valueRange = minOf(280f, availableWidth)..maxOf(minOf(280f, availableWidth), availableWidth - if (wide && dock == VoiceDock.RIGHT) 280f else 0f),
+                            modifier = Modifier.semantics { contentDescription = "Ancho del panel de voz" })
+                    }
+                    if (dock != VoiceDock.RIGHT) {
+                        Text("Altura: ${panelHeight.toInt()}")
+                        Slider(panelHeight, { requestedHeight = it }, valueRange = minOf(260f, availableHeight)..availableHeight,
+                            modifier = Modifier.semantics { contentDescription = "Altura del panel de voz" })
+                    }
+                    Text("También puedes arrastrar el borde. En modo flotante, mueve el panel desde su título.", style = MaterialTheme.typography.bodySmall)
+                }
+            }, confirmButton = { TextButton(onClick = { sizeDialog = false }) { Text("Listo") } })
         }
+    }
+}
+
+@Composable
+private fun ResizeHandle(vertical: Boolean, onResize: (Float) -> Unit) {
+    val density = LocalDensity.current
+    val resize by rememberUpdatedState(onResize)
+    Box((if (vertical) Modifier.width(10.dp).fillMaxHeight() else Modifier.height(10.dp).fillMaxWidth())
+        .background(MaterialTheme.colorScheme.surfaceContainerHigh).pointerInput(vertical) {
+            detectDragGestures { change, delta -> change.consume(); resize((if (vertical) delta.x else delta.y) / density.density) }
+        }.semantics { contentDescription = "Redimensionar panel de voz" }, contentAlignment = Alignment.Center) {
+        Box((if (vertical) Modifier.width(3.dp).height(36.dp) else Modifier.height(3.dp).width(36.dp))
+            .background(MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)))
     }
 }
 
 @Composable
 private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, automatic: Boolean, onAdd: (Set<Long>) -> Unit,
     onInsert: (String) -> Unit, modifier: Modifier, onClose: () -> Unit, references: List<BibleReference>,
-    suggestions: List<BibleReferenceSuggestion>, onReference: (BibleReference) -> Unit) {
+    suggestions: List<BibleReferenceSuggestion>, onReference: (BibleReference) -> Unit,
+    onExport: () -> Unit, compact: Boolean, dock: VoiceDock, onDock: (VoiceDock) -> Unit, onResize: () -> Unit, dragHandle: Modifier) {
     val context = LocalContext.current
+    var placementMenu by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(emptySet<Long>()) }
     val list = rememberLazyListState()
     var following by remember { mutableStateOf(true) }
@@ -273,18 +417,28 @@ private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, aut
         if (following && last >= 0) list.animateScrollToItem(last)
     }
     Surface(modifier, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 4.dp else 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).then(dragHandle)) {
                     Text("Transcripción", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(if (automatic) "Las frases confirmadas pasan a tu nota" else "Selecciona palabras o varios fragmentos",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = { Clipboard.copy(context, "Transcripción", entries.joinToString("\n\n") { it.text }) }, enabled = entries.isNotEmpty()) {
-                    Icon(Icons.Filled.ContentCopy, "Copiar transcripción completa")
+                IconButton(onClick = { Clipboard.copy(context, "Transcripción", entries.joinToString("\n\n") { it.text }) }, enabled = entries.isNotEmpty(), modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.ContentCopy, "Copiar transcripción completa", Modifier.size(20.dp)) }
+                IconButton(onClick = onExport, enabled = entries.isNotEmpty() || partial.isNotBlank(), modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.Download, "Exportar transcripción a TXT", Modifier.size(20.dp)) }
+                Box {
+                    IconButton(onClick = { placementMenu = true }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.OpenWith, "Ubicación y tamaño del panel", Modifier.size(20.dp)) }
+                    DropdownMenu(placementMenu, { placementMenu = false }) {
+                        VoiceDock.entries.forEach { position -> DropdownMenuItem(text = { Text(position.label) },
+                            onClick = { onDock(position); placementMenu = false }, leadingIcon = { if (dock == position) Icon(Icons.Filled.Check, null) }) }
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text("Cambiar tamaño") }, onClick = { onResize(); placementMenu = false })
+                    }
                 }
-                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Cerrar transcripción") }
+                IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.ExpandMore, "Cerrar transcripción", Modifier.size(22.dp)) }
             }
+            if (!compact) Text(if (automatic) "Las frases confirmadas pasan a tu nota" else "Selecciona palabras o varios fragmentos",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (references.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 references.takeLast(4).forEach { ref -> AssistChip(onClick = { onReference(ref) }, label = { Text(ref.label) }) }
             }
@@ -296,7 +450,7 @@ private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, aut
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { onAdd(if (selected.isNotEmpty()) selected else entries.filterNot { it.added }.map { it.id }.toSet()); selected = emptySet() },
-                    enabled = entries.any { !it.added }) {
+                    enabled = entries.any { !it.added }, modifier = if (compact) Modifier.height(32.dp) else Modifier) {
                     Icon(Icons.Filled.Add, null, Modifier.size(16.dp)); Text(if (selected.isEmpty()) "Añadir todo" else "Añadir selección (${selected.size})")
                 }
                 if (selected.isNotEmpty()) TextButton(onClick = { selected = emptySet() }) { Text("Cancelar") }
@@ -363,9 +517,9 @@ private fun TranscriptCard(entry: TranscriptEntry, selected: Boolean, onSelected
 }
 
 @Composable
-private fun MicrophoneBar(listening: Boolean, state: EngineState, automatic: Boolean, level: Float, onAuto: (Boolean) -> Unit, onToggle: () -> Unit) {
+private fun MicrophoneBar(listening: Boolean, state: EngineState, automatic: Boolean, level: Float, onAuto: (Boolean) -> Unit, onToggle: () -> Unit, compact: Boolean = false) {
     Surface(shadowElevation = 8.dp) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (compact) 6.dp else 10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onToggle) {
@@ -378,11 +532,12 @@ private fun MicrophoneBar(listening: Boolean, state: EngineState, automatic: Boo
                 Text("Automático", style = MaterialTheme.typography.labelSmall)
             }
         }
-        Text(if (!listening) "Micrófono pausado" else when (state) {
+        if (!compact) Text(if (!listening) "Micrófono pausado" else when (state) {
             EngineState.STARTING -> "Iniciando…"
             EngineState.RESTARTING -> "Reconectando…"
             else -> "Escuchando"
         }, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+        if (listening && !compact) Text("Sigue escuchando al minimizar. Pausar detiene el micrófono.", style = MaterialTheme.typography.labelSmall)
         if (listening) LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(3.dp))
         }
     }

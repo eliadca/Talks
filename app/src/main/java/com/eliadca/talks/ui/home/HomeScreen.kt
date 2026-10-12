@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.eliadca.talks.container
 import com.eliadca.talks.core.doc.RichDoc
 import com.eliadca.talks.core.doc.toMarkdown
 import com.eliadca.talks.data.AppSettings
@@ -90,7 +91,13 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     var menuExpanded by rememberSaveable { mutableStateOf(false) }
     var notesOpen by rememberSaveable { mutableStateOf(false) }
-    val notes: NotesViewModel = viewModel()
+    val noteContext = LocalContext.current
+    val notes = remember { noteContext.container.noteWorkspace }
+    LaunchedEffect(notes.navigationRequest) {
+        if (notes.navigationRequest > 0) {
+            notesOpen = true; menuExpanded = false; notes.consumeNavigationRequest()
+        }
+    }
     var confirmDelete by remember { mutableStateOf<SpeechListItem?>(null) }
     var movingSpeech by remember { mutableStateOf<SpeechListItem?>(null) }
     /** Writing with the whole screen: the list of speeches is folded away. */
@@ -139,7 +146,7 @@ fun HomeScreen(
             .background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
-        val showRail = maxWidth >= RAIL_MIN_WIDTH
+        val showRail = maxWidth >= RAIL_MIN_WIDTH && !(notesOpen && notes.fullScreen)
         val listWidth = if (maxWidth >= 1200.dp) 360.dp else 330.dp
         val railWidth = if (showRail) { if (menuExpanded) 280.dp else RAIL_WIDTH } else 0.dp
         val twoPane = maxWidth - railWidth - listWidth >= MIN_EDITOR_WIDTH
@@ -258,7 +265,7 @@ fun HomeScreen(
 
         val newSpeech: () -> Unit = { notesOpen = false; home.createSpeech(); closeMenu() }
         SidebarLayout(
-            expanded = menuExpanded,
+            expanded = menuExpanded && !(notesOpen && notes.fullScreen),
             onClose = closeMenu,
             showRail = showRail,
             menu = {

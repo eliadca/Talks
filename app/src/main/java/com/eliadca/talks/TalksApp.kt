@@ -36,6 +36,7 @@ class AppContainer(private val context: Context) {
     val settings: SettingsRepository by lazy { SettingsRepository(context) }
     val speeches: SpeechRepository by lazy { SpeechRepository(database) }
     val notes: com.eliadca.talks.data.NotesRepository by lazy { com.eliadca.talks.data.NotesRepository(database.notes(), scope) }
+    val noteWorkspace: com.eliadca.talks.ui.notes.NotesViewModel by lazy { com.eliadca.talks.ui.notes.NotesViewModel(context.applicationContext as Application) }
     val bible: com.eliadca.talks.bible.JwpubBible by lazy { com.eliadca.talks.bible.JwpubBible(context) }
     val voskModel: VoskModelController by lazy { VoskModelController(VoskModelManager(context), scope) }
 

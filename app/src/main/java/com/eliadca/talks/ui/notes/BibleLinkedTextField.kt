@@ -6,6 +6,17 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
+import com.eliadca.talks.core.notes.NoteFormatting
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -55,7 +66,10 @@ private fun passageEnd(text: String, match: BibleReferenceMatch): Int {
 fun BibleLinkedTextField(
     fieldValue: TextFieldValue, onValueChange: (TextFieldValue) -> Unit, readOnly: Boolean, linksEnabled: Boolean,
     onReference: (BibleReference) -> Unit, textStyle: TextStyle, onTextLayout: (TextLayoutResult) -> Unit,
-    modifier: Modifier = Modifier, decorationBox: @Composable (@Composable () -> Unit) -> Unit = { it() },
+    modifier: Modifier = Modifier,
+    formatting: NoteFormatting = NoteFormatting(), textScale: Float = 1f,
+    onReferenceAt: ((BibleReference, Rect) -> Unit)? = null, onAnchorChanged: (Rect) -> Unit = {},
+    decorationBox: @Composable (@Composable () -> Unit) -> Unit = { it() },
 ) {
     val links by produceState(NoteLinks("", emptyList()), fieldValue.text) {
         delay(100)
@@ -65,13 +79,34 @@ fun BibleLinkedTextField(
     val matches = if (links.source == fieldValue.text) links.matches else emptyList()
     val quoteEnds = remember(matches, fieldValue.text) { matches.associateWith { passageEnd(fieldValue.text, it) } }
     val open by rememberUpdatedState(onReference)
+    val openAt by rememberUpdatedState(onReferenceAt)
+    val moveAnchor by rememberUpdatedState(onAnchorChanged)
+    var anchorOffset by remember { mutableStateOf<Int?>(null) }
+    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
     val color = MaterialTheme.colorScheme.primary
-    val transformation = remember(matches, quoteEnds, color) {
+    val transformation = remember(matches, quoteEnds, color, formatting, textScale) {
         object : VisualTransformation {
             override fun filter(text: AnnotatedString): TransformedText {
                 val builder = AnnotatedString.Builder(text)
+                formatting.spans.forEach { span ->
+                    val a = span.start.coerceIn(0, text.length); val b = span.end.coerceIn(a, text.length)
+                    if (b > a) with(span.style) {
+                        val decorations = buildList { if (underline) add(TextDecoration.Underline); if (strike) add(TextDecoration.LineThrough) }
+                        builder.addStyle(SpanStyle(fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+                            fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
+                            textDecoration = TextDecoration.combine(decorations), fontSize = (size * textScale).sp,
+                            color = span.style.color?.let { Color(it) } ?: Color.Unspecified,
+                            background = span.style.highlight?.let { Color(it) } ?: Color.Unspecified), a, b)
+                    }
+                }
+                formatting.paragraphs.forEach { paragraph ->
+                    val a = paragraph.start.coerceIn(0, text.length); val b = paragraph.end.coerceIn(a, text.length)
+                    if (b > a) builder.addStyle(ParagraphStyle(textAlign = when (paragraph.alignment) {
+                        1 -> TextAlign.Center; 2 -> TextAlign.End; 3 -> TextAlign.Justify; else -> TextAlign.Start
+                    }), a, b)
+                }
                 matches.filter { it.end <= text.length }.forEach {
                     val quoteEnd = quoteEnds[it] ?: it.end
                     if (quoteEnd > it.end && quoteEnd <= text.length) builder.addStyle(SpanStyle(background = color.copy(alpha = .04f)), it.start, quoteEnd)
@@ -85,7 +120,12 @@ fun BibleLinkedTextField(
     BasicTextField(fieldValue, onValueChange, readOnly = readOnly, textStyle = textStyle,
         visualTransformation = transformation,
         onTextLayout = { layout = it; onTextLayout(it) }, decorationBox = decorationBox,
-        modifier = modifier
+        modifier = modifier.onGloballyPositioned { coord ->
+            coordinates = coord
+            anchorOffset?.takeIf { it in fieldValue.text.indices }?.let { offset ->
+                layout?.getBoundingBox(offset)?.let { bounds -> moveAnchor(bounds.translate(coord.positionInWindow())) }
+            }
+        }
             .semantics {
                 customActions = if (!linksEnabled) emptyList() else matches.distinctBy { it.reference }.map { match ->
                     CustomAccessibilityAction("Ver ${match.reference.label}") { open(match.reference); true }
@@ -109,7 +149,11 @@ fun BibleLinkedTextField(
                             if (!change.pressed) {
                                 if (!dragged && event.type == PointerEventType.Release &&
                                     change.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
-                                    change.consume(); keyboard?.hide(); open(match.reference)
+                                    change.consume(); keyboard?.hide()
+                                    val origin = coordinates?.takeIf { it.isAttached }?.positionInWindow()
+                                    val box = offset?.coerceIn(0, (fieldValue.text.length - 1).coerceAtLeast(0))?.let { layout?.getBoundingBox(it) }
+                                    if (origin != null && box != null && openAt != null) { anchorOffset = offset; openAt?.invoke(match.reference, box.translate(origin)) }
+                                    else open(match.reference)
                                 }
                                 break
                             }

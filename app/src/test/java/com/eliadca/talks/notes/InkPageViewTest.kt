@@ -77,4 +77,29 @@ class InkPageViewTest {
         assertTrue(page.document.strokes.single().points.all { it.x < 200f })
         assertEquals(PenKind.BALLPOINT, page.document.strokes.single().kind)
     }
+    @Test fun aFingerCanSelectMoveAndResizePressureStrokesWithoutDrawingExtraInk() {
+        val page = page(); page.stylusOnly = true
+        page.document = InkDocument().addStroke(PenKind.PENCIL, 12, 5f,
+            listOf(InkPoint(100f, 100f, .2f), InkPoint(300f, 200f, .8f)))
+        page.tool = InkTool.SELECT
+        send(page, MotionEvent.ACTION_DOWN, 20f, 20f, stylus = false)
+        send(page, MotionEvent.ACTION_UP, 170f, 120f, stylus = false)
+        assertEquals(setOf(1L), page.selection)
+        send(page, MotionEvent.ACTION_DOWN, 100f, 75f, stylus = false)
+        send(page, MotionEvent.ACTION_MOVE, 150f, 175f, stylus = false)
+        send(page, MotionEvent.ACTION_UP, 150f, 175f, stylus = false)
+        assertEquals(InkPoint(200f, 300f, .2f), page.document.strokes.single().points.first())
+        val old = page.document
+        send(page, MotionEvent.ACTION_DOWN, 205f, 205f, stylus = false)
+        send(page, MotionEvent.ACTION_MOVE, 260f, 260f, stylus = false)
+        send(page, MotionEvent.ACTION_UP, 260f, 260f, stylus = false)
+        assertTrue(page.document.strokes.single().width > old.strokes.single().width)
+        assertEquals(.8f, page.document.strokes.single().points.last().pressure)
+        page.document = page.document.resizePage(2000f, 1500f)
+        page.tool = InkTool.PEN
+        send(page, MotionEvent.ACTION_DOWN, 100f, 100f)
+        send(page, MotionEvent.ACTION_UP, 120f, 120f)
+        assertEquals(400f, page.document.strokes.last().points.first().x)
+    }
+
 }

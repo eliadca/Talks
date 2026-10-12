@@ -84,7 +84,8 @@ class NotesPersistenceTest {
         try {
             val repo = NotesRepository(db.notes(), scope)
             val note = repo.create()
-            repeat(50) { repo.save(note.copy(body = "Texto $it")) }
+            repeat(50) { index -> repo.save(note.copy(body = "Texto $index"), InkDocument().addTextBox("Cuadro $index")) }
+            assertEquals("Cuadro 49", Json.decodeFromString<InkDocument>(repo.load(note.id)!!.ink).textBoxes.single().text)
             assertEquals("Texto 49", repo.load(note.id)!!.body)
             repo.save(note.copy(body = "Último texto"))
             repo.delete(note.id)
@@ -99,6 +100,8 @@ class NotesPersistenceTest {
         try {
             val drawing = InkDocument(wholePageRuled = true).addStroke(PenKind.FOUNTAIN, 0xff123456.toInt(), 7f,
                 listOf(InkPoint(20f, 90f, .2f), InkPoint(90f, 170f, .8f)))
+                .addTextBox("Anotación móvil").resizePage(1600f, 3000f).let { it.copy(formatting =
+                    com.eliadca.talks.core.notes.NoteFormatting().apply(0, 3) { style -> style.copy(bold = true, size = 60f) }) }
             db.notes().insert(NoteEntity(title = "Reunión", body = "Mis ideas", transcript = "[{\"id\":1,\"text\":\"Original\"}]", automatic = true, createdAt = 100, updatedAt = 200,
                 ink = Json.encodeToString(drawing)))
             SpeechRepository(db).create("Discurso previo", Markup.parse("Conservar"))

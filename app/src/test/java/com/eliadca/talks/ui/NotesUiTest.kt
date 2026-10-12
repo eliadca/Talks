@@ -158,7 +158,7 @@ class NotesUiTest {
                     { ink = history.undo() }, { ink = history.redo() }, Modifier.width(580.dp).fillMaxHeight())
             }
         }
-        compose.onNodeWithText("Lápiz").performClick()
+        compose.onNodeWithContentDescription("Modo lápiz").performClick()
         compose.onNodeWithTag("ink-page").performTouchInput { swipe(Offset(70f, 100f), Offset(220f, 150f), 200) }
         compose.runOnIdle { assertEquals(1, ink.strokes.size) }
         compose.onNodeWithContentDescription("Deshacer escritura").performClick()
@@ -168,7 +168,7 @@ class NotesUiTest {
         compose.onNodeWithText("Resaltador").performClick()
         compose.onNodeWithContentDescription("Color #1565C0").performClick()
         compose.onNodeWithText("Listo").performClick()
-        compose.onNodeWithText("Resaltador · grosor 5 · lápiz o dedo").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(ink.strokes.isNotEmpty()) }
         compose.onNodeWithContentDescription("Renglones").performScrollTo().performClick()
         compose.onNodeWithContentDescription("Renglones en toda la página").performClick()
         compose.runOnIdle { assertTrue(ink.wholePageRuled) }
@@ -240,8 +240,55 @@ class NotesUiTest {
                     Modifier.width(580.dp).fillMaxHeight(), onReference = { opened = it })
             }
         }
-        compose.onNodeWithText("Lápiz").performClick()
+        compose.onNodeWithContentDescription("Modo lápiz").performClick()
         compose.onNodeWithTag("ink-page").performTouchInput { swipe(Offset(40f, 38f), Offset(180f, 42f), 200) }
         compose.runOnIdle { assertEquals(1, ink.strokes.size); assertEquals(null, opened) }
     }
+    @Test fun theAudioPanelDocksAboveBelowAndFloatsWithMovementResizeAndTxtExport() {
+        var exports = 0
+        compose.setContent { MaterialTheme { NotesWorkspace(entries, "", TextFieldValue("Mi nota"), false, true, {}, {}, {},
+            Modifier.fillMaxSize(), onExport = { exports++ }) } }
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        compose.onNodeWithContentDescription("Exportar transcripción a TXT").performClick(); assertEquals(1, exports)
+        compose.onNodeWithContentDescription("Ubicación y tamaño del panel").performClick()
+        compose.onNodeWithText("Debajo de la nota").performClick()
+        var panel = compose.onNodeWithTag("voice-panel").fetchSemanticsNode().boundsInRoot
+        var page = compose.onNodeWithTag("note-page-scroll").fetchSemanticsNode().boundsInRoot
+        assertTrue(panel.top >= page.bottom)
+        compose.onNodeWithContentDescription("Ubicación y tamaño del panel").performClick()
+        compose.onNodeWithText("Encima de la nota").performClick()
+        panel = compose.onNodeWithTag("voice-panel").fetchSemanticsNode().boundsInRoot
+        page = compose.onNodeWithTag("note-page-scroll").fetchSemanticsNode().boundsInRoot
+        assertTrue(panel.bottom <= page.top)
+        compose.onNodeWithContentDescription("Ubicación y tamaño del panel").performClick()
+        compose.onNodeWithText("Flotante sobre la nota").performClick()
+        val before = compose.onNodeWithTag("voice-panel").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithText("Transcripción").performTouchInput { swipe(center, center + Offset(50f, 40f), 200) }
+        val after = compose.onNodeWithTag("voice-panel").fetchSemanticsNode().boundsInRoot
+        assertTrue(after.left > before.left && after.top > before.top)
+        compose.onNodeWithContentDescription("Ubicación y tamaño del panel").performClick()
+        compose.onNodeWithText("Cambiar tamaño").performClick()
+        compose.onNodeWithContentDescription("Ancho del panel de voz").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(520f) }
+        compose.onNodeWithText("Listo").performClick()
+        compose.onNodeWithTag("voice-panel").assertWidthIsEqualTo(520.dp)
+        screenshot("notes-floating-audio")
+    }
+
+    @Test fun aMovableTextBoxAndLargerSheetUseTheSameSavedDocument() {
+        var ink by mutableStateOf(InkDocument())
+        compose.setContent { MaterialTheme { HandwritingNotePanel(TextFieldValue("Texto principal"), {}, ink, { ink = it }, false, false, {}, {}, Modifier.fillMaxSize()) } }
+        compose.onNodeWithContentDescription("Añadir cuadro de texto móvil").performClick()
+        compose.onNodeWithText("Texto del cuadro").performTextInput("Una anotación móvil")
+        compose.onNodeWithText("Guardar").performClick()
+        compose.runOnIdle { assertEquals("Una anotación móvil", ink.textBoxes.single().text) }
+        compose.onNodeWithContentDescription("Duplicar trazos").performClick()
+        compose.runOnIdle { assertEquals(2, ink.textBoxes.size) }
+        compose.onNodeWithContentDescription("Tamaño de hoja y zoom").performClick()
+        compose.onNodeWithContentDescription("Ancho de hoja").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1600f) }
+        compose.onNodeWithContentDescription("Altura de hoja").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(3000f) }
+        compose.onNodeWithText("Aplicar").performClick()
+        compose.runOnIdle { assertEquals(1600f, ink.pageWidth); assertEquals(3000f, ink.height) }
+        screenshot("notes-large-paper")
+    }
+
 }

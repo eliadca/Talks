@@ -163,4 +163,60 @@ class NotesViewModelTest {
             app.container.scope.cancel(); app.container.database.close(); app.container.speechEngineFactory = null
         }
     }
+    @Test fun captureContinuesInItsOriginalNoteWhileTheLibraryOrAnotherNoteIsOpen() {
+        val vm = NotesViewModel(app); val store = ViewModelStore().also { it.put("notes", vm) }
+        val engine = Engine(); app.container.speechEngineFactory = { engine }
+        try {
+            vm.create(); until { vm.note != null }; vm.title("Grabación"); vm.automatic(true)
+            val recording = vm.note!!.id
+            vm.start(); until { vm.engineState == EngineState.LISTENING }
+            engine.final("Primera frase"); until { vm.entries.size == 1 }
+            vm.backToList(); assertTrue(vm.listening); assertFalse(engine.released)
+            engine.final("Desde la biblioteca")
+            until { runBlocking { app.container.notes.load(recording) }!!.body.contains("Desde la biblioteca") }
+            vm.create(); until { vm.note != null }
+            val other = vm.note!!.id
+            vm.edit(TextFieldValue("Texto de otra nota"))
+            engine.final("Desde otra nota")
+            until { runBlocking { app.container.notes.load(recording) }!!.body.contains("Desde otra nota") }
+            assertEquals("Texto de otra nota", vm.body.text); assertTrue(vm.entries.isEmpty()); assertEquals("", vm.partial)
+            vm.open(recording); until { vm.note?.id == recording }
+            assertEquals(3, vm.entries.size); assertTrue(vm.listening)
+            engine.partial("Último fragmento pendiente"); until { vm.partial.isNotBlank() }
+            assertTrue(vm.exportTranscript().contains("Último fragmento pendiente"))
+            val export = File(app.filesDir, "transcripción.txt")
+            vm.exportTranscript(android.net.Uri.fromFile(export), vm.exportTranscript())
+            until { export.exists() && export.readText().contains("Último fragmento pendiente") }
+            assertTrue(export.readText().contains("Desde otra nota"))
+            vm.pause(); assertTrue(engine.released)
+            assertFalse(vm.entries.last().confirmed)
+            assertEquals("Texto de otra nota", runBlocking { app.container.notes.load(other) }!!.body)
+        } finally {
+            store.clear(); runBlocking { app.container.notes.flush() }
+            app.container.scope.cancel(); app.container.database.close(); app.container.speechEngineFactory = null
+        }
+    }
+
+    @Test fun richTextUndoRedoAndFormattingSurviveReopeningAlongsideDrawing() {
+        val vm = NotesViewModel(app); val store = ViewModelStore().also { it.put("notes", vm) }
+        try {
+            vm.create(); until { vm.note != null }; val id = vm.note!!.id
+            vm.edit(TextFieldValue("Mi idea importante", TextRange(3, 7)))
+            vm.formatText { it.copy(bold = true, size = 60f) }
+            assertTrue(vm.ink.formatting.styleAt(4).bold)
+            vm.undoText(); assertFalse(vm.ink.formatting.styleAt(4).bold)
+            vm.redoText(); assertTrue(vm.ink.formatting.styleAt(4).bold)
+            vm.editInk(vm.ink.addStroke(PenKind.PENCIL, 1, 3f, listOf(InkPoint(100f, 100f))))
+            vm.undoInk(); assertTrue(vm.ink.strokes.isEmpty()); assertTrue(vm.ink.formatting.styleAt(4).bold)
+            vm.redoInk(); assertTrue(vm.ink.formatting.styleAt(4).bold)
+            vm.backToList(); vm.open(id); until { vm.note?.id == id }
+            assertEquals("Mi idea importante", vm.body.text); assertEquals(60f, vm.ink.formatting.styleAt(4).size)
+            assertEquals(1, vm.ink.strokes.size)
+            vm.edit(TextFieldValue(vm.body.text, TextRange(0)))
+            vm.listText(true); assertTrue(vm.body.text.startsWith("☐ "))
+        } finally {
+            store.clear(); runBlocking { app.container.notes.flush() }; app.container.scope.cancel(); app.container.database.close()
+        }
+    }
+
 }
