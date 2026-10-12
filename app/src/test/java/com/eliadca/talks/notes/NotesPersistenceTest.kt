@@ -49,7 +49,7 @@ class NotesPersistenceTest {
             it.execSQL("DROP TABLE notes"); it.execSQL("DELETE FROM room_master_table"); it.version = 1
         }
         val upgraded = Room.databaseBuilder(context, TalksDatabase::class.java, name)
-            .addMigrations(TalksDatabase.MIGRATION_1_2, TalksDatabase.MIGRATION_2_3).build()
+            .addMigrations(TalksDatabase.MIGRATION_1_2, TalksDatabase.MIGRATION_2_3, TalksDatabase.MIGRATION_3_4).build()
         try {
             assertEquals(speech, upgraded.speeches().get(id))
             assertEquals(folder, upgraded.folders().all().single().id)
@@ -74,8 +74,24 @@ class NotesPersistenceTest {
             it.execSQL("CREATE INDEX index_notes_updatedAt ON notes (updatedAt)")
             it.execSQL("DELETE FROM room_master_table"); it.version = 2
         }
-        val upgraded = Room.databaseBuilder(context, TalksDatabase::class.java, name).addMigrations(TalksDatabase.MIGRATION_2_3).build()
+        val upgraded = Room.databaseBuilder(context, TalksDatabase::class.java, name).addMigrations(TalksDatabase.MIGRATION_2_3, TalksDatabase.MIGRATION_3_4).build()
         try { assertEquals(saved, upgraded.notes().get(7)) } finally { upgraded.close() }
+    }
+
+    @Test fun migrationKeepsLegacyTextDrawingAndTranscriptWhenAddingReviewedCapture() = runBlocking {
+        val name="migration-capture.db"; context.deleteDatabase(name)
+        val original=Room.databaseBuilder(context,TalksDatabase::class.java,name).build()
+        val saved=NoteEntity(id=11,title="Anterior",body="Mi nota",transcript="[{\"id\":1,\"text\":\"Original\"}]",createdAt=5,updatedAt=8,ink=Json.encodeToString(InkDocument().addTextBox("Texto móvil")))
+        original.notes().insert(saved);original.close()
+        SQLiteDatabase.openDatabase(context.getDatabasePath(name).path,null,SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("ALTER TABLE notes RENAME TO old_notes")
+            it.execSQL("CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, transcript TEXT NOT NULL, automatic INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, ink TEXT NOT NULL DEFAULT '{}')")
+            it.execSQL("INSERT INTO notes SELECT id,title,body,transcript,automatic,createdAt,updatedAt,ink FROM old_notes")
+            it.execSQL("DROP TABLE old_notes");it.execSQL("CREATE INDEX index_notes_updatedAt ON notes (updatedAt)")
+            it.execSQL("DELETE FROM room_master_table");it.version=3
+        }
+        val upgraded=Room.databaseBuilder(context,TalksDatabase::class.java,name).addMigrations(TalksDatabase.MIGRATION_3_4).build()
+        try { assertEquals(saved,upgraded.notes().get(11)) } finally {upgraded.close()}
     }
 
     @Test fun orderedSavesCannotOverwriteNewerEditsAndDeletionWaitsForPendingWrites() = runBlocking {
@@ -103,7 +119,7 @@ class NotesPersistenceTest {
                 .addTextBox("Anotación móvil").resizePage(1600f, 3000f).let { it.copy(formatting =
                     com.eliadca.talks.core.notes.NoteFormatting().apply(0, 3) { style -> style.copy(bold = true, size = 60f) }) }
             db.notes().insert(NoteEntity(title = "Reunión", body = "Mis ideas", transcript = "[{\"id\":1,\"text\":\"Original\"}]", automatic = true, createdAt = 100, updatedAt = 200,
-                ink = Json.encodeToString(drawing)))
+                ink = Json.encodeToString(drawing), capture = Json.encodeToString(com.eliadca.talks.core.notes.TranscriptRevision("Original corregido.",1,true))))
             SpeechRepository(db).create("Discurso previo", Markup.parse("Conservar"))
             val file = File(context.cacheDir, "notes-backup.json")
             val uri = Uri.fromFile(file)

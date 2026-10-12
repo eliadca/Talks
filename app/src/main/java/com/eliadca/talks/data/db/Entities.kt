@@ -17,6 +17,7 @@ data class NoteEntity(
     val createdAt: Long,
     val updatedAt: Long,
     @ColumnInfo(defaultValue = "'{}'") val ink: String = "{}",
+    @ColumnInfo(defaultValue = "'{}'") val capture: String = "{}",
 )
 
 data class NoteListItem(val id: Long, val title: String, val preview: String, val updatedAt: Long)

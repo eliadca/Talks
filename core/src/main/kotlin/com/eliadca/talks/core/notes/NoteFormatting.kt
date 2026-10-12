@@ -50,6 +50,12 @@ data class NoteFormatting(val spans: List<NoteTextSpan> = emptyList(), val parag
         }.filter { it.end > it.start })
     }
 
+    fun slice(start: Int, end: Int): NoteFormatting = NoteFormatting(
+        spans.mapNotNull { span -> val a=maxOf(span.start,start); val b=minOf(span.end,end)
+            if (a<b) span.copy(start=a-start,end=b-start) else null },
+        paragraphs.mapNotNull { paragraph -> val a=maxOf(paragraph.start,start); val b=minOf(paragraph.end,end)
+            if (a<b) paragraph.copy(start=a-start,end=b-start) else null })
+
     fun align(text: String, start: Int, end: Int, alignment: Int): NoteFormatting {
         val a = text.lastIndexOf('\n', (start - 1).coerceAtLeast(-1)) + 1
         val b = text.indexOf('\n', end.coerceAtMost(text.length)).takeIf { it >= 0 } ?: text.length

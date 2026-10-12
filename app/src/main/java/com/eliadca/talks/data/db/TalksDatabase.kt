@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TalkSessionEntity::class,
         NoteEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class TalksDatabase : RoomDatabase() {
@@ -39,8 +39,14 @@ abstract class TalksDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN capture TEXT NOT NULL DEFAULT '{}'")
+            }
+        }
+
         fun build(context: Context): TalksDatabase =
             Room.databaseBuilder(context.applicationContext, TalksDatabase::class.java, "talks.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     }
 }

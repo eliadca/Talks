@@ -67,13 +67,25 @@ class NotesUiTest {
             }
         }
         compose.onNodeWithContentDescription("Abrir transcripción").performClick()
-        compose.onNodeWithTag("fragment-1").performTextInputSelection(TextRange(3, 10))
+        compose.onNodeWithTag("transcript-text").performTextInputSelection(TextRange(3, 10))
         compose.onNodeWithText("Añadir selección").performClick()
         assertEquals("primera", selectedText)
         compose.onNodeWithTag("note-body").assertTextContains("primera")
         screenshot("notes-tablet")
     }
 
+    @Test fun selectionCanSpanTwoRecognitionPhrasesAndAiReceivesOnlyTheSelection() {
+        var inserted="";var aiFragment=""
+        val text=entries.joinToString(" "){it.text}
+        compose.setContent {MaterialTheme {NotesWorkspace(entries,"",TextFieldValue(""),false,true,{}, {},{inserted=it},Modifier.fillMaxSize(),aiInstalled=true,onAi={all,a,b->aiFragment=all.substring(a,b)})}}
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        val start=text.indexOf("importante");val end=text.indexOf("que merece")
+        compose.onNodeWithTag("transcript-text").performTextInputSelection(TextRange(start,end))
+        compose.onNodeWithText("Revisar con IA").performClick()
+        assertEquals(text.substring(start,end),aiFragment)
+        compose.onNodeWithText("Añadir selección").performClick()
+        assertEquals(text.substring(start,end),inserted)
+    }
     @Test fun aPhoneCanCloseAndReopenTheRightPanelWithoutDiscardingTheTranscript() {
         var added = emptySet<Long>()
         compose.setContent {
@@ -92,7 +104,7 @@ class NotesUiTest {
         compose.onNodeWithContentDescription("Cerrar transcripción").performClick()
         compose.onNodeWithTag("note-body").assertTextContains("Mis ideas guardadas")
         compose.onNodeWithContentDescription("Abrir transcripción").performClick()
-        compose.onNodeWithTag("fragment-1").assertTextContains(entries[0].text)
+        compose.onNodeWithTag("transcript-text").assertTextContains(entries[0].text,substring=true)
         screenshot("notes-phone")
     }
 
@@ -143,9 +155,9 @@ class NotesUiTest {
             }
         }
         compose.onNodeWithContentDescription("Abrir transcripción").performClick()
-        compose.onNodeWithTag("fragment-12").assertIsDisplayed()
+        compose.onNodeWithTag("transcript-text").assertTextContains("Fragmento 12",substring=true)
         compose.runOnIdle { transcript = transcript + TranscriptEntry(13, "Última frase confirmada") }
-        compose.onNodeWithTag("fragment-13").assertIsDisplayed()
+        compose.onNodeWithTag("transcript-text").assertTextContains("Última frase confirmada",substring=true)
     }
 
     @Test fun handwritingToolsDrawOverTextAndSaveWholePageOrSelectedAreaRuling() {
@@ -179,6 +191,18 @@ class NotesUiTest {
         screenshot("notes-handwriting")
     }
 
+    @Test fun existingTypedTextMovesAndAFreeTextBoxRemainsEditableOnThePage() {
+        var ink by mutableStateOf(InkDocument().addTextBox("Texto libre",350f))
+        compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Texto anterior"),{},ink,{ink=it},false,false,{},{},Modifier.width(580.dp).fillMaxHeight())}}
+        compose.onNodeWithContentDescription("Mover y ajustar texto").performClick()
+        compose.onNodeWithTag("ink-page").performTouchInput {swipe(Offset(120f,48f),Offset(150f,180f),200)}
+        compose.runOnIdle {assertTrue(ink.bodyFrame!=null);assertTrue(ink.bodyFrame!!.y>40f)}
+        compose.onNodeWithTag("note-body").assertTextContains("Texto anterior")
+        compose.onNodeWithContentDescription("Modo teclado").performClick()
+        compose.onNodeWithTag("text-box-1").performTextInput(" ampliado")
+        compose.runOnIdle {assertTrue(ink.textBoxes.single().text.contains("ampliado"))}
+        screenshot("notes-movable-text")
+    }
     @Test fun aLongTypedNoteExpandsTheSamePageUsedForHandwriting() {
         val text = (1..200).joinToString("\n") { "Idea $it de la reunión" }
         compose.setContent {
@@ -226,9 +250,9 @@ class NotesUiTest {
             MaterialTheme { NotesWorkspace(listOf(fixed), "", TextFieldValue(""), false, true, {}, {}, {}, Modifier.fillMaxSize()) }
         }
         compose.onNodeWithContentDescription("Abrir transcripción").performClick()
-        compose.onNodeWithText("Nombre bíblico corregido · ver original").performClick()
-        compose.onNodeWithText("Efecios 2:8").assertIsDisplayed()
-        compose.onNodeWithTag("fragment-1").assertTextContains("Efesios 2:8")
+        compose.onNodeWithTag("transcript-text").assertTextContains("Efesios 2:8")
+        compose.onNodeWithContentDescription("Ver transcripción original").performClick()
+        compose.onNodeWithTag("transcript-text").assertTextContains("Efecios 2:8")
     }
 
     @Test fun drawingOverAReferenceUsesThePenWithoutOpeningTheBible() {

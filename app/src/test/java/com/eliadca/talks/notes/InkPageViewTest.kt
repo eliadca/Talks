@@ -42,12 +42,30 @@ class InkPageViewTest {
         assertEquals(.8f, stroke.points[1].pressure)
         page.layout(0, 0, 1000, 2000)
         assertEquals(stroke, page.document.strokes.single())
-        page.tool = InkTool.ERASER
+        page.tool = InkTool.ERASER; page.eraserMode = com.eliadca.talks.ui.notes.EraserMode.STROKE
         send(page, MotionEvent.ACTION_DOWN, 200f, 300f)
         send(page, MotionEvent.ACTION_UP, 200f, 300f)
         assertTrue(page.document.strokes.isEmpty())
     }
 
+    @Test fun partialEraserCutsOnlyTheMiddleAndCommitsOneGesture() {
+        val page=page();var commits=0
+        page.document=InkDocument().addStroke(PenKind.BALLPOINT,7,4f,listOf(InkPoint(100f,200f),InkPoint(900f,200f)))
+        page.onChange={commits++;page.document=it};page.tool=InkTool.ERASER
+        send(page,MotionEvent.ACTION_DOWN,250f,50f);send(page,MotionEvent.ACTION_MOVE,250f,150f)
+        assertEquals(1,page.document.strokes.size)
+        send(page,MotionEvent.ACTION_UP,250f,150f)
+        assertEquals(1,commits);assertEquals(2,page.document.strokes.size)
+        assertEquals(100f,page.document.strokes.first().points.first().x)
+        assertEquals(900f,page.document.strokes.last().points.last().x)
+    }
+    @Test fun theExistingTextFrameCanBeSelectedAndMovedWithThePen() {
+        val page=page();page.document=InkDocument(bodyFrame=com.eliadca.talks.core.ink.NoteTextFrame(100f,100f,400f,200f));page.tool=InkTool.SELECT
+        send(page,MotionEvent.ACTION_DOWN,75f,75f);send(page,MotionEvent.ACTION_UP,75f,75f)
+        assertEquals(setOf(InkDocument.MAIN_TEXT_ID),page.selection)
+        send(page,MotionEvent.ACTION_DOWN,100f,100f);send(page,MotionEvent.ACTION_MOVE,180f,220f);send(page,MotionEvent.ACTION_UP,180f,220f)
+        assertEquals(260f,page.document.bodyFrame!!.x);assertEquals(340f,page.document.bodyFrame!!.y)
+    }
     @Test fun partialRulingIsARegionAndTextOrMoveModeDoesNotConsumeDrawingInput() {
         val page = page()
         page.tool = InkTool.RULE_AREA

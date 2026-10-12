@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -24,6 +24,9 @@ jobs:
           java-version: "17"
 
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install native toolchain
+        run: sdkmanager "ndk;28.2.13676358" "cmake;3.22.1"
 
       - name: Test and build
         run: |
@@ -97,6 +100,8 @@ jobs:
             done
             return 0
           }
+          install "ndk;28.2.13676358"
+          install "cmake;3.22.1"
           install "emulator"
           install "system-images;android-34;google_apis;x86_64"
 

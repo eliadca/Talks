@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import com.eliadca.talks.core.notes.NoteFormatting
 import kotlin.math.max
 
-/** Coordinates belong to a fixed-width page, so ink keeps its position when the screen changes. */
+/** Document coordinates keep content in place independently of the viewport and zoom. */
 @Serializable
 data class InkPoint(val x: Float, val y: Float, val pressure: Float = .5f)
 
@@ -16,7 +16,12 @@ data class InkStroke(val id: Long, val kind: PenKind, val color: Int, val width:
 
 @Serializable
 data class NoteTextBox(val id: Long, val text: String, val x: Float, val y: Float,
-    val width: Float = 500f, val height: Float = 220f, val size: Float = 46f, val color: Int = 0xff232b3c.toInt())
+    val width: Float = 500f, val height: Float = 220f, val size: Float = 46f, val color: Int = 0xff232b3c.toInt(),
+    val formatting: NoteFormatting = NoteFormatting())
+
+@Serializable
+data class NoteTextFrame(val x: Float = 40f, val y: Float = 40f, val width: Float = 920f,
+    val height: Float = 100f, val scale: Float = 1f)
 
 @Serializable
 data class RuledArea(val id: Long, val left: Float, val top: Float, val right: Float, val bottom: Float)
@@ -32,6 +37,7 @@ data class InkDocument(
     val pageWidth: Float = PAGE_WIDTH,
     val formatting: NoteFormatting = NoteFormatting(),
     val textBoxes: List<NoteTextBox> = emptyList(),
+    val bodyFrame: NoteTextFrame? = null,
 ) {
     fun addStroke(kind: PenKind, color: Int, width: Float, points: List<InkPoint>): InkDocument {
         val valid = points.filter { it.x.isFinite() && it.y.isFinite() && it.pressure.isFinite() }
@@ -65,7 +71,8 @@ data class InkDocument(
     fun selectionBounds(ids: Set<Long>): InkBounds? {
         val chosen = strokes.filter { it.id in ids }.flatMap { it.points }
         val boxes = textBoxes.filter { it.id in ids }
-        val all = chosen + boxes.flatMap { listOf(InkPoint(it.x, it.y), InkPoint(it.x + it.width, it.y + it.height)) }
+        val body = bodyFrame?.takeIf { MAIN_TEXT_ID in ids }?.let { listOf(InkPoint(it.x,it.y), InkPoint(it.x+it.width,it.y+it.height)) }.orEmpty()
+        val all = chosen + body + boxes.flatMap { listOf(InkPoint(it.x, it.y), InkPoint(it.x + it.width, it.y + it.height)) }
         if (all.isEmpty()) return null
         return InkBounds(all.minOf { it.x }, all.minOf { it.y }, all.maxOf { it.x }, all.maxOf { it.y })
     }
@@ -77,7 +84,7 @@ data class InkDocument(
         }
     }.map { it.id }.toSet() + textBoxes.filter { box ->
         box.x <= bounds.right && box.x + box.width >= bounds.left && box.y <= bounds.bottom && box.y + box.height >= bounds.top
-    }.map { it.id }
+    }.map { it.id } + if (bodyFrame?.let { it.x <= bounds.right && it.x+it.width >= bounds.left && it.y<=bounds.bottom && it.y+it.height>=bounds.top } == true) setOf(MAIN_TEXT_ID) else emptySet()
 
     fun addTextBox(text: String, y: Float = 160f): InkDocument {
         if (text.isBlank()) return this
@@ -101,7 +108,9 @@ data class InkDocument(
         val boxes = textBoxes.map { box -> if (box.id !in ids) box else box.copy(
             x = x + (box.x - bounds.left) * scale, y = y + (box.y - bounds.top) * scale,
             width = box.width * scale, height = box.height * scale, size = box.size * scale) }
-        return copy(strokes = result, textBoxes = boxes, height = max(height, y + (bounds.bottom - bounds.top) * scale + 100))
+        val frame = bodyFrame?.let { f -> if (MAIN_TEXT_ID !in ids) f else f.copy(
+            x=x+(f.x-bounds.left)*scale, y=y+(f.y-bounds.top)*scale, width=f.width*scale, height=f.height*scale, scale=f.scale*scale) }
+        return copy(strokes = result, textBoxes = boxes, bodyFrame = frame, height = max(height, y + (bounds.bottom - bounds.top) * scale + 100))
     }
     fun duplicateSelection(ids: Set<Long>): InkDocument {
         val chosen = strokes.filter { it.id in ids }
@@ -112,12 +121,12 @@ data class InkDocument(
             .transformSelection(copyIds + boxes.map { it.id }, 40f, 60f)
     }
     fun resizePage(width: Float, newHeight: Float): InkDocument {
-        val contentRight = maxOf(strokes.flatMap { it.points }.maxOfOrNull { it.x } ?: 0f, areas.maxOfOrNull { it.right } ?: 0f, textBoxes.maxOfOrNull { it.x + it.width } ?: 0f)
-        val contentBottom = maxOf(strokes.flatMap { it.points }.maxOfOrNull { it.y } ?: 0f, areas.maxOfOrNull { it.bottom } ?: 0f, textBoxes.maxOfOrNull { it.y + it.height } ?: 0f)
+        val contentRight = maxOf(strokes.flatMap { it.points }.maxOfOrNull { it.x } ?: 0f, areas.maxOfOrNull { it.right } ?: 0f, textBoxes.maxOfOrNull { it.x + it.width } ?: 0f, bodyFrame?.let { it.x+it.width } ?: 0f)
+        val contentBottom = maxOf(strokes.flatMap { it.points }.maxOfOrNull { it.y } ?: 0f, areas.maxOfOrNull { it.bottom } ?: 0f, textBoxes.maxOfOrNull { it.y + it.height } ?: 0f, bodyFrame?.let { it.y+it.height } ?: 0f)
         return copy(pageWidth = maxOf(width.coerceIn(600f, 2400f), contentRight + 32), height = maxOf(newHeight.coerceIn(1000f, 20000f), contentBottom + 100))
     }
 
-    companion object { const val PAGE_WIDTH = 1000f }
+    companion object { const val PAGE_WIDTH = 1000f; const val MAIN_TEXT_ID = 0L }
 }
 
 data class InkBounds(val left: Float, val top: Float, val right: Float, val bottom: Float) {

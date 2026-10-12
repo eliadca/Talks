@@ -8,6 +8,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.DashPathEffect
 import com.eliadca.talks.core.ink.InkBounds
+import com.eliadca.talks.core.ink.erasePart
 import android.view.MotionEvent
 import android.view.View
 import android.text.StaticLayout
@@ -17,6 +18,8 @@ import com.eliadca.talks.core.ink.InkDocument
 import com.eliadca.talks.core.ink.InkPoint
 import com.eliadca.talks.core.ink.InkStroke
 import com.eliadca.talks.core.ink.PenKind
+
+enum class EraserMode { PARTIAL, STROKE }
 
 enum class InkTool { TEXT, PEN, ERASER, MOVE, SELECT, RULE_AREA }
 
@@ -28,6 +31,11 @@ class InkPageView(context: Context) : View(context) {
     var pen = PenKind.BALLPOINT
     var penColor = Color.rgb(35, 43, 60)
     var penWidth = 5f
+    var eraserMode = EraserMode.PARTIAL
+    var eraserRadius = 20f
+    var drawTextBoxes = true
+    var onPreview: (InkDocument?) -> Unit = {}
+    private var erasedPreview: InkDocument? = null
     var usePressure = true
     var stylusOnly = false
     var ruleColor = Color.rgb(165, 181, 201)
@@ -70,12 +78,12 @@ class InkPageView(context: Context) : View(context) {
         }
         if (document.wholePageRuled) lines(32f, 32f, document.pageWidth - 32, height / scale)
         else document.areas.forEach { lines(it.left, it.top, it.right, it.bottom) }
-        val existing = document.strokes.map { it.id }.toSet()
+        val existing = (erasedPreview ?: selectionPreview ?: document).strokes.map { it.id }.toSet()
         rendered.keys.retainAll(existing)
-        (selectionPreview ?: document).strokes.filterNot { it.id in erased }.forEach { drawStroke(canvas, it) }
+        (erasedPreview ?: selectionPreview ?: document).strokes.filterNot { it.id in erased }.forEach { drawStroke(canvas, it) }
         val boxes = (selectionPreview ?: document).textBoxes
         textLayouts.keys.retainAll(boxes.map { it.id }.toSet())
-        boxes.forEach { box ->
+        if (drawTextBoxes) boxes.forEach { box ->
             val layout = textLayouts[box.id]?.takeIf { it.first == box }?.second ?: run {
                 val p = TextPaint(textPaint).apply { textSize = box.size; color = box.color }
                 StaticLayout.Builder.obtain(box.text, 0, box.text.length, p, box.width.toInt().coerceAtLeast(1))
@@ -100,6 +108,10 @@ class InkPageView(context: Context) : View(context) {
                 paint.pathEffect = null; paint.style = Paint.Style.FILL
                 canvas.drawCircle(box.right + margin, box.bottom + margin, 8f / scale, paint)
             }
+        }
+        if (erasing && points.isNotEmpty()) {
+            val p = points.last(); paint.style = Paint.Style.STROKE; paint.color = ruleColor; paint.alpha = 200; paint.strokeWidth = 2f / scale
+            canvas.drawCircle(p.x, p.y, eraserRadius, paint)
         }
         canvas.restore()
     }
@@ -164,7 +176,7 @@ class InkPageView(context: Context) : View(context) {
                 gestureTool = tool; gesturePen = pen; gestureWidth = penWidth; gestureColor = penColor
                 erasing = tool == InkTool.ERASER || kind == MotionEvent.TOOL_TYPE_ERASER ||
                     (activeStylus && event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY != 0)
-                points.clear(); erased = emptySet()
+                points.clear(); erased = emptySet(); erasedPreview = null
                 parent?.requestDisallowInterceptTouchEvent(true)
                 sample(event, index)
                 if (tool == InkTool.SELECT) {
@@ -191,7 +203,7 @@ class InkPageView(context: Context) : View(context) {
                 sample(event, event.actionIndex)
                 finishGesture(); performClick()
             }
-            MotionEvent.ACTION_CANCEL -> { cancelGesture() }
+            MotionEvent.ACTION_CANCEL -> { if (activeStylus) finishGesture() else cancelGesture() }
         }
         invalidate()
         return true
@@ -204,7 +216,11 @@ class InkPageView(context: Context) : View(context) {
             if (history < 0) event.getPressure(index) else event.getHistoricalPressure(index, history)
         } else .5f
         val point = InkPoint((x / scale).coerceIn(0f, document.pageWidth), (y / scale).coerceAtLeast(0f), pressure.coerceIn(0f, 1f))
-        if (erasing) erased = erased + document.strokesHit(points.lastOrNull() ?: point, point, maxOf(18f, gestureWidth * 3))
+        if (erasing) {
+            val previous = points.lastOrNull() ?: point
+            if (eraserMode == EraserMode.PARTIAL) erasedPreview = (erasedPreview ?: document).erasePart(previous, point, eraserRadius)
+            else erased = erased + document.strokesHit(previous, point, eraserRadius)
+        }
         points.add(point)
         if (gestureTool == InkTool.SELECT && selectionDrag && points.size > 1) {
             val origin = points.first()
@@ -213,6 +229,7 @@ class InkPageView(context: Context) : View(context) {
                 val initial = kotlin.math.hypot(origin.x - bounds.left, origin.y - bounds.top).coerceAtLeast(1f)
                 document.transformSelection(selection, factor = kotlin.math.hypot(point.x - bounds.left, point.y - bounds.top) / initial)
             } else document.transformSelection(selection, point.x - origin.x, point.y - origin.y)
+            onPreview(selectionPreview)
         }
     }
 
@@ -221,13 +238,14 @@ class InkPageView(context: Context) : View(context) {
         if (gestureTool == InkTool.SELECT && !selectionDrag && points.isNotEmpty()) {
             val a = points.first(); val b = points.last()
             val chosen = if (kotlin.math.hypot(a.x - b.x, a.y - b.y) < 10f / scale) document.textBoxes.lastOrNull { a.x in it.x..(it.x + it.width) && a.y in it.y..(it.y + it.height) }?.let { setOf(it.id) }
+                ?: document.bodyFrame?.takeIf { a.x in it.x..(it.x+it.width) && a.y in it.y..(it.y+it.height) }?.let { setOf(InkDocument.MAIN_TEXT_ID) }
                 ?: document.strokesHit(a, b, 14f / scale).takeLastStroke()
                 else document.selectRectangle(InkBounds(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y)))
             selection = chosen; onSelectionChange(chosen)
         }
         val updated = when {
             gestureTool == InkTool.SELECT -> selectionPreview ?: document
-            erasing -> document.copy(strokes = document.strokes.filterNot { it.id in erased })
+            erasing -> erasedPreview ?: document.copy(strokes = document.strokes.filterNot { it.id in erased })
             gestureTool == InkTool.RULE_AREA && points.isNotEmpty() -> document.addArea(points.first(), points.last())
             gestureTool == InkTool.PEN -> document.addStroke(gesturePen, gestureColor, gestureWidth, points.toList())
             else -> document
@@ -239,7 +257,7 @@ class InkPageView(context: Context) : View(context) {
     }
 
     private fun cancelGesture() {
-        activePointer = -1; points.clear(); erased = emptySet(); selectionPreview = null; selectionDrag = false; selectionResize = false
+        activePointer = -1; points.clear(); erased = emptySet(); erasedPreview = null; selectionPreview = null; onPreview(null); selectionDrag = false; selectionResize = false
         parent?.requestDisallowInterceptTouchEvent(false); invalidate()
     }
 

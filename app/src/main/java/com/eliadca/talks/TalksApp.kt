@@ -40,6 +40,9 @@ class AppContainer(private val context: Context) {
     val bible: com.eliadca.talks.bible.JwpubBible by lazy { com.eliadca.talks.bible.JwpubBible(context) }
     val voskModel: VoskModelController by lazy { VoskModelController(VoskModelManager(context), scope) }
 
+    val notesAi by lazy { com.eliadca.talks.notesai.NotesAi(context, scope) }
+    val notesVosk by lazy { VoskModelController(VoskModelManager(context, advanced = true), scope) }
+
     /** Test hook: when set, Talks mode listens through this engine instead of the real recogniser. */
     @Volatile
     var speechEngineFactory: ((AppSettings) -> SpeechEngine)? = null

@@ -20,7 +20,10 @@ import com.eliadca.talks.core.bible.BibleReference
 import com.eliadca.talks.core.bible.BibleReferences
 import com.eliadca.talks.core.bible.BibleReferenceSuggestion
 import com.eliadca.talks.core.ink.InkDocument
-import com.eliadca.talks.core.ink.InkHistory
+import com.eliadca.talks.core.notes.TranscriptRevision
+import com.eliadca.talks.core.notes.continuousText
+import com.eliadca.talks.core.notes.CorrectionReview
+import com.eliadca.talks.speech.NotesVoskSpeechEngine
 import com.eliadca.talks.data.AppSettings
 import com.eliadca.talks.data.EngineKind
 import com.eliadca.talks.data.db.NoteEntity
@@ -44,11 +47,53 @@ import kotlinx.serialization.json.Json
 
 @Serializable
 data class TranscriptEntry(val id: Long, val text: String, val added: Boolean = false, val confirmed: Boolean = true,
-    val originalText: String? = null)
+    val originalText: String? = null, val confidence: Float? = null)
 
 class NotesViewModel(private val app: Application, repository: com.eliadca.talks.data.NotesRepository? = null) : AndroidViewModel(app) {
     private val services = app.container
     private val repo = repository ?: services.notes
+    val ai = services.notesAi
+    val advancedModel = services.notesVosk
+    val smallModel = services.voskModel
+    private val voicePrefs = app.getSharedPreferences("notes-voice", android.content.Context.MODE_PRIVATE)
+    var voiceEngine by mutableStateOf(EngineKind.VOSK); private set
+    var voiceLanguage by mutableStateOf("es-US"); private set
+    var advancedVosk by mutableStateOf(voicePrefs.getBoolean("advanced",false)); private set
+    var aiBusy by mutableStateOf(false); private set
+    var aiProgress by mutableStateOf(""); private set
+    data class AiReview(val original: String, val proposed: String, val before: String, val after: String,
+        val throughId: Long, val base: String, val concern: String?)
+    var aiReview by mutableStateOf<AiReview?>(null); private set
+    private var aiJob: Job? = null
+    fun configureVoice(engine: EngineKind, language: String, advanced: Boolean) {
+        if(listening)return
+        voiceEngine=engine; voiceLanguage=language; advancedVosk=advanced
+        voicePrefs.edit().putString("engine",engine.name).putString("language",language).putBoolean("advanced",advanced).apply()
+    }
+    fun cancelAi() { aiJob?.cancel(); aiReview=null }
+    fun reviewWithAi(text: String, start: Int, end: Int) {
+        if(aiBusy || text != transcriptText || note==null)return
+        val a=start.coerceIn(0,text.length); val b=end.coerceIn(a,text.length)
+        val source=text.substring(a,b); if(source.isBlank())return
+        val owner=note!!.id; val last=entries.maxOfOrNull { it.id } ?: 0
+        aiBusy=true; aiReview=null
+        aiJob=viewModelScope.launch {
+            try {
+                val proposed=ai.correct(source) { current,total -> viewModelScope.launch { aiProgress="Revisando $current de $total…" } }
+                if(note?.id==owner) aiReview=AiReview(source,proposed,text.take(a),text.drop(b),last,text,CorrectionReview.concern(source,proposed))
+            } catch(e: Exception) { report(e) }
+            finally { aiBusy=false; aiProgress="" }
+        }
+    }
+    fun applyAiReview() {
+        val review=aiReview ?: return
+        val prefix=revision.render(entries.filter { it.id<=review.throughId }.map { it.id to it.text })
+        if(prefix!=review.base) { aiReview=null; message="El texto cambió durante la revisión. Vuelve a revisarlo."; return }
+        if(review.concern!=null) { message=review.concern; return }
+        revision=TranscriptRevision(review.before+review.proposed+review.after,review.throughId,true); aiReview=null; persist()
+    }
+    fun dismissAiReview() { aiReview=null }
+
     val items = repo.items.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<NoteListItem>())
     val saveError = repo.error
     var note by mutableStateOf<NoteEntity?>(null); private set
@@ -56,7 +101,7 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
     var ink by mutableStateOf(InkDocument()); private set
     var canUndoInk by mutableStateOf(false); private set
     var canRedoInk by mutableStateOf(false); private set
-    private val inkHistory = InkHistory()
+
     private var recordingInk = InkDocument()
     var navigationRequest by mutableIntStateOf(0); private set
     fun requestOpenFromNotification(id: Long) { open(id); navigationRequest++ }
@@ -65,13 +110,23 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
     var canUndoText by mutableStateOf(false); private set
     var canRedoText by mutableStateOf(false); private set
     var typingStyle by mutableStateOf<NoteTextStyle?>(null); private set
-    private data class TextSnapshot(val value: TextFieldValue, val format: NoteFormatting)
+    private data class TextSnapshot(val value: TextFieldValue, val drawing: InkDocument)
     private val textPast = ArrayDeque<TextSnapshot>()
     private val textFuture = ArrayDeque<TextSnapshot>()
     private var recordingNote by mutableStateOf<NoteEntity?>(null)
     val recordingNoteId get() = recordingNote?.id.takeIf { listening }
     val recordingTitle get() = recordingNote?.title?.ifBlank { "Sin título" }.orEmpty()
     private var recordingEntries = emptyList<TranscriptEntry>()
+    var revision by mutableStateOf(TranscriptRevision()); private set
+    val transcriptText get() = revision.render(entries.map { it.id to it.text })
+    val originalTranscript get() = continuousText(entries.map { it.originalText ?: it.text })
+    fun editTranscript(text: String, assisted: Boolean = false, baseText: String = transcriptText) {
+        val current=transcriptText
+        val replacement=if(current==baseText)text else if(current.startsWith(baseText))text+current.drop(baseText.length)
+            else {message="El texto cambió. Revisa la transcripción actual antes de editar.";return}
+        revision = TranscriptRevision(replacement, entries.maxOfOrNull { it.id } ?: 0, assisted); scheduleEditSave()
+    }
+    fun restoreTranscript() { revision = TranscriptRevision(); persist() }
     var entries by mutableStateOf(emptyList<TranscriptEntry>()); private set
     private var capturePartial by mutableStateOf("")
     val partial get() = if (note?.id == recordingNote?.id) capturePartial else ""
@@ -100,6 +155,11 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
     private val json = Json { ignoreUnknownKeys = true }
 
     init {
+        viewModelScope.launch {
+            val settings=services.settings.settings.first()
+            voiceEngine=runCatching { EngineKind.valueOf(voicePrefs.getString("engine",settings.engine.name)!!) }.getOrDefault(settings.engine)
+            voiceLanguage=voicePrefs.getString("language",settings.language) ?: settings.language
+        }
         viewModelScope.launch {
             try { bible = services.bible.info() }
             catch (_: Exception) { message = "Vuelve a importar la Biblia para activar las citas." }
@@ -131,16 +191,16 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
         catch (e: Exception) { message = "No se pudo leer la transcripción guardada."; return }
         val drawing = capturedDrawing ?: try { json.decodeFromString<InkDocument>(value.ink) }
         catch (e: Exception) { message = "No se pudo leer la escritura guardada. Conserva una copia de seguridad."; return }
-        lookup?.cancel(); referenceRequest++; lastDetection = null; passage = null; detected = emptyList(); referenceSuggestions = emptyList()
+        cancelAi(); lookup?.cancel(); referenceRequest++; lastDetection = null; passage = null; detected = emptyList(); referenceSuggestions = emptyList()
         note = value
         body = TextFieldValue(value.body, TextRange(value.body.length))
         entries = transcript
-        inkHistory.reset(drawing); ink = drawing; canUndoInk = false; canRedoInk = false
+        ink = drawing; revision = runCatching { json.decodeFromString<TranscriptRevision>(value.capture) }.getOrDefault(TranscriptRevision())
         textPast.clear(); textFuture.clear(); typingStyle = null; syncTextHistory()
         if (recordingNote?.id == value.id) { recordingNote = value; recordingEntries = transcript; recordingInk = drawing }
     }
 
-    fun backToList() { persist(); fullScreen = false; lookup?.cancel(); referenceRequest++; note = null; passage = null; detected = emptyList(); referenceSuggestions = emptyList() }
+    fun backToList() { persist(); cancelAi(); fullScreen = false; lookup?.cancel(); referenceRequest++; note = null; passage = null; detected = emptyList(); referenceSuggestions = emptyList() }
     fun title(value: String) { note = note?.copy(title = value.take(160)); scheduleEditSave() }
     fun edit(value: TextFieldValue) {
         val changed = value.text != body.text
@@ -153,10 +213,10 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
     }
     val currentTextStyle get() = typingStyle ?: ink.formatting.styleAt(body.selection.min.coerceAtMost((body.text.length - 1).coerceAtLeast(0)))
     private fun rememberText() {
-        textPast.addLast(TextSnapshot(body, ink.formatting)); if (textPast.size > 60) textPast.removeFirst()
+        textPast.addLast(TextSnapshot(body, ink)); if (textPast.size > 60) textPast.removeFirst()
         textFuture.clear(); syncTextHistory()
     }
-    private fun syncTextHistory() { canUndoText = textPast.isNotEmpty(); canRedoText = textFuture.isNotEmpty() }
+    private fun syncTextHistory() { canUndoText = textPast.isNotEmpty(); canRedoText = textFuture.isNotEmpty(); canUndoInk = canUndoText; canRedoInk = canRedoText }
     fun formatText(transform: (NoteTextStyle) -> NoteTextStyle) {
         if (body.selection.collapsed) { typingStyle = transform(currentTextStyle); return }
         rememberText()
@@ -169,14 +229,14 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
     }
     fun undoText() {
         if (textPast.isEmpty()) return
-        textFuture.addLast(TextSnapshot(body, ink.formatting)); restoreText(textPast.removeLast())
+        textFuture.addLast(TextSnapshot(body, ink)); restoreText(textPast.removeLast())
     }
     fun redoText() {
         if (textFuture.isEmpty()) return
-        textPast.addLast(TextSnapshot(body, ink.formatting)); restoreText(textFuture.removeLast())
+        textPast.addLast(TextSnapshot(body, ink)); restoreText(textFuture.removeLast())
     }
     private fun restoreText(snapshot: TextSnapshot) {
-        body = snapshot.value; ink = ink.copy(formatting = snapshot.format); typingStyle = null
+        body = snapshot.value; ink = snapshot.drawing; typingStyle = null
         syncTextHistory(); persist()
     }
     fun listText(checklist: Boolean) {
@@ -189,10 +249,20 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
         edit(TextFieldValue(body.text.replaceRange(start, end, replacement), TextRange(start, start + replacement.length)))
         persist()
     }
+    fun moveTextSelection() {
+        if(note==null || body.selection.collapsed)return
+        val start=body.selection.min; val end=body.selection.max
+        val text=body.text.substring(start,end);val format=ink.formatting.slice(start,end)
+        rememberText()
+        val updated=ink.addTextBox(text, (ink.bodyFrame?.y ?: 40f)+180f)
+        val remaining=body.text.removeRange(start,end)
+        ink=updated.copy(textBoxes=updated.textBoxes.map {if(it.id==ink.nextId)it.copy(formatting=format) else it}, formatting=ink.formatting.replace(body.text,remaining))
+        body=TextFieldValue(remaining,TextRange(start));persist()
+    }
     fun flushEdits() = persist()
     fun exportTranscript(): String = buildString {
-        append(entries.joinToString("\n\n") { it.text })
-        if (partial.isNotBlank()) { if (isNotEmpty()) append("\n\n"); append(partial.trim()) }
+        append(transcriptText)
+        if (partial.isNotBlank()) { if (isNotEmpty()) append(" "); append(partial.trim()) }
     }
     fun exportTranscript(uri: Uri, text: String) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -206,14 +276,10 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
     fun automatic(value: Boolean) { note = note?.copy(automatic = value); persist() }
     fun editInk(value: InkDocument) {
         if (note == null || value == ink) return
-        inkHistory.record(value); syncInk()
+        rememberText(); ink = value; persist()
     }
-    fun undoInk() { inkHistory.undo(); syncInk() }
-    fun redoInk() { inkHistory.redo(); syncInk() }
-    private fun syncInk() {
-        ink = inkHistory.document.copy(formatting = ink.formatting); canUndoInk = inkHistory.canUndo; canRedoInk = inkHistory.canRedo
-        persist()
-    }
+    fun undoInk() = undoText()
+    fun redoInk() = redoText()
     fun toggleCitations(value: Boolean) {
         citationsEnabled = value
         lastDetection = null
@@ -237,7 +303,7 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
     private fun persist() {
         editSave?.cancel(); editSave = null
         val current = note ?: return
-        val snapshot = current.copy(body = body.text, transcript = json.encodeToString(entries), updatedAt = System.currentTimeMillis())
+        val snapshot = current.copy(body = body.text, transcript = json.encodeToString(entries), capture = json.encodeToString(revision), updatedAt = System.currentTimeMillis())
         note = snapshot
         if (recordingNote?.id == snapshot.id) { recordingNote = snapshot; recordingEntries = entries; recordingInk = ink }
         repo.save(snapshot, ink)
@@ -261,7 +327,7 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
         val chosen = entries.filter { it.id in ids && !it.added }
         if (chosen.isEmpty()) return
         entries = entries.map { if (it in chosen) it.copy(added = true) else it }
-        insert(chosen.joinToString("\n\n") { it.text })
+        insert(continuousText(chosen.map { it.text }))
     }
     fun addPassage() {
         val quote = passage ?: return
@@ -318,7 +384,7 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
                                 capturePartial = ""
                                 if (text.isNotEmpty()) {
                                     captureEntry(TranscriptEntry((recordingEntries.maxOfOrNull { it.id } ?: 0) + 1, text,
-                                        originalText = raw.takeIf { it != text }))
+                                        originalText = raw.takeIf { it != text }, confidence = event.confidence))
                                     if (note?.id == recordingNote?.id) detect(text, debounce = false)
                                 }
                             }
@@ -341,7 +407,7 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
             entries = recordingEntries
             if (automatic) {
                 val old = body
-                val separator = if (old.text.isBlank()) "" else "\n\n"
+                val separator = if (old.text.isBlank() || old.text.endsWith("\n")) "" else " "
                 val text = old.text + separator + entry.text
                 val pending = typingStyle; typingStyle = NoteTextStyle()
                 edit(TextFieldValue(text, if (old.selection.collapsed && old.selection.end == old.text.length) TextRange(text.length) else old.selection))
@@ -349,7 +415,7 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
             }
             persist()
         } else {
-            val newBody = if (automatic) owner.body + (if (owner.body.isBlank()) "" else "\n\n") + entry.text else owner.body
+            val newBody = if (automatic) owner.body + (if (owner.body.isBlank() || owner.body.endsWith("\n")) "" else " ") + entry.text else owner.body
             if (newBody != owner.body) recordingInk = recordingInk.copy(formatting = recordingInk.formatting.replace(owner.body, newBody, NoteTextStyle()))
             recordingNote = owner.copy(body = newBody, transcript = json.encodeToString(recordingEntries), updatedAt = System.currentTimeMillis())
             repo.save(recordingNote!!, recordingInk)
@@ -370,9 +436,9 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
         NotesRecordingService.stop(app)
     }
 
-    private fun createEngine(s: AppSettings): SpeechEngine = services.speechEngineFactory?.invoke(s) ?: when (s.engine) {
-        EngineKind.VOSK -> VoskSpeechEngine(app, services.voskModel.manager.modelDir)
-        EngineKind.ANDROID -> AndroidSpeechEngine(app, AndroidSpeechEngine.Config(s.language, s.preferOffline, s.forceGoogleService, s.muteSounds))
+    private fun createEngine(s: AppSettings): SpeechEngine = services.speechEngineFactory?.invoke(s) ?: when (voiceEngine) {
+        EngineKind.VOSK -> NotesVoskSpeechEngine(app, if (advancedVosk) advancedModel.manager.modelDir else services.voskModel.manager.modelDir)
+        EngineKind.ANDROID -> AndroidSpeechEngine(app, AndroidSpeechEngine.Config(voiceLanguage, s.preferOffline, s.forceGoogleService, s.muteSounds, notesMode = true))
     }
 
     private fun detect(text: String, debounce: Boolean) {

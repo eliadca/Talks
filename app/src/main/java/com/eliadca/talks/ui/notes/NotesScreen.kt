@@ -60,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -86,6 +87,12 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
     val saveError by vm.saveError.collectAsState()
     var citationAnchor by remember { mutableStateOf<Rect?>(null) }
     var exportText by remember { mutableStateOf("") }
+    val aiInstalled by vm.ai.installed.collectAsState()
+    var voiceOptions by remember { mutableStateOf(false) }
+    var aiOptions by remember { mutableStateOf(false) }
+    if(voiceOptions) NotesVoiceOptions(vm) { voiceOptions=false }
+    if(aiOptions) NotesAiSetup(vm) { aiOptions=false }
+    NotesAiReview(vm)
     var bibleOptions by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf<NoteListItem?>(null) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -176,6 +183,12 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
                             exportText = vm.exportTranscript()
                             exporter.launch(vm.note!!.title.ifBlank { "Nota" }.replace(Regex("[\\/:*?\"<>|]"), "_") + "_transcripcion.txt")
                         },
+                        transcriptValue=vm.transcriptText, originalTranscript=vm.originalTranscript,
+                        onEditTranscript={text,base->vm.editTranscript(text,baseText=base)}, onRestoreTranscript=vm::restoreTranscript,
+                        onAi={text,start,end->if(!aiInstalled)aiOptions=true else vm.reviewWithAi(text,start,end)},
+                        aiBusy=vm.aiBusy, aiInstalled=aiInstalled, aiProgress=vm.aiProgress, onCancelAi=vm::cancelAi,
+                        voiceLabel=if(vm.voiceEngine==com.eliadca.talks.data.EngineKind.VOSK)if(vm.advancedVosk)"Vosk preciso · Español" else "Vosk compacto · Español" else "Android · ${vm.voiceLanguage}",
+                        onVoiceOptions={voiceOptions=true}, onMoveTextSelection=vm::moveTextSelection,
                         references = vm.detected, suggestions = vm.referenceSuggestions,
                         allowBack = allowBack,
                         onToggleListen = {
@@ -263,7 +276,7 @@ private fun NoteLibrary(notes: List<NoteListItem>, onOpen: (Long) -> Unit, onDel
     }
 }
 
-private enum class VoiceDock(val label: String) { RIGHT("Derecha"), BOTTOM("Debajo de la nota"), TOP("Encima de la nota"), FLOATING("Flotante sobre la nota") }
+internal enum class VoiceDock(val label: String) { RIGHT("Derecha"), BOTTOM("Debajo de la nota"), TOP("Encima de la nota"), FLOATING("Flotante sobre la nota") }
 
 /** Editing tools span the top. The audio panel docks, resizes or floats independently of capture. */
 @Composable
@@ -280,6 +293,11 @@ fun NotesWorkspace(
     textStyle: com.eliadca.talks.core.notes.NoteTextStyle = com.eliadca.talks.core.notes.NoteTextStyle(),
     onAlign: (Int) -> Unit = {}, onList: (Boolean) -> Unit = {}, canUndoText: Boolean = false, canRedoText: Boolean = false,
     onUndoText: () -> Unit = {}, onRedoText: () -> Unit = {}, onExport: () -> Unit = {},
+    transcriptValue: String = com.eliadca.talks.core.notes.continuousText(entries.map { it.text }),
+    originalTranscript: String = com.eliadca.talks.core.notes.continuousText(entries.map { it.originalText ?: it.text }),
+    onEditTranscript: (String,String) -> Unit = {_,_->}, onRestoreTranscript: () -> Unit = {},
+    onAi: (String,Int,Int) -> Unit = {_,_,_->}, aiBusy: Boolean = false, aiInstalled: Boolean = false,
+    aiProgress: String = "", onCancelAi: () -> Unit = {}, voiceLabel: String = "Voz", onVoiceOptions: () -> Unit = {}, onMoveTextSelection: () -> Unit = {},
 ) {
     var panelOpen by rememberSaveable { mutableStateOf(false) }
     var dock by rememberSaveable { mutableStateOf(VoiceDock.RIGHT) }
@@ -294,7 +312,7 @@ fun NotesWorkspace(
     BackHandler(panelOpen && allowBack) { panelOpen = false }
     Column(modifier.fillMaxSize().imePadding()) {
         NoteEditorToolbar(editorState, body, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk,
-            onFormat, textStyle, onAlign, onList, canUndoText, canRedoText, onUndoText, onRedoText)
+            onFormat, textStyle, onAlign, onList, canUndoText, canRedoText, onUndoText, onRedoText, onMoveTextSelection)
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val availableWidth = maxWidth.value; val availableHeight = maxHeight.value
             val panelWidth = requestedWidth.coerceIn(minOf(280f, availableWidth), if (wide && dock == VoiceDock.RIGHT) maxOf(280f, availableWidth - 280f) else availableWidth)
@@ -313,6 +331,9 @@ fun NotesWorkspace(
                             TranscriptPanel(entries, partial, automatic, onAdd, onInsert, Modifier.weight(1f).fillMaxWidth(),
                                 onClose = { panelOpen = false }, references = references, suggestions = suggestions, onReference = onReference,
                                 onExport = onExport, compact = compact, dock = dock, onDock = { dock = it }, onResize = { sizeDialog = true },
+                                transcriptValue = transcriptValue, originalTranscript = originalTranscript, onEditTranscript = onEditTranscript,
+                                onRestoreTranscript = onRestoreTranscript, onAi = onAi, aiBusy = aiBusy, aiInstalled = aiInstalled,
+                                aiProgress = aiProgress, onCancelAi = onCancelAi,
                                 dragHandle = Modifier.pointerInput(dock, availableWidth, availableHeight, panelWidth, panelHeight) {
                                     if (dock == VoiceDock.FLOATING) detectDragGestures { change, delta ->
                                         change.consume()
@@ -320,7 +341,7 @@ fun NotesWorkspace(
                                         floatingY = (floatingY + delta.y / density.density / maxOf(1f, availableHeight - panelHeight)).coerceIn(0f, 1f)
                                     }
                                 })
-                            MicrophoneBar(listening, engineState, automatic, level, onAuto, onToggleListen, compact)
+                            MicrophoneBar(listening, engineState, automatic, level, onAuto, onToggleListen, compact, voiceLabel, onVoiceOptions)
                         }
                         Box(Modifier.align(Alignment.BottomEnd).size(24.dp).pointerInput(availableWidth, availableHeight, dock) {
                             detectDragGestures { change, delta ->
@@ -401,123 +422,77 @@ private fun ResizeHandle(vertical: Boolean, onResize: (Float) -> Unit) {
 private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, automatic: Boolean, onAdd: (Set<Long>) -> Unit,
     onInsert: (String) -> Unit, modifier: Modifier, onClose: () -> Unit, references: List<BibleReference>,
     suggestions: List<BibleReferenceSuggestion>, onReference: (BibleReference) -> Unit,
-    onExport: () -> Unit, compact: Boolean, dock: VoiceDock, onDock: (VoiceDock) -> Unit, onResize: () -> Unit, dragHandle: Modifier) {
+    onExport: () -> Unit, compact: Boolean, dock: VoiceDock, onDock: (VoiceDock) -> Unit, onResize: () -> Unit, dragHandle: Modifier,
+    transcriptValue: String, originalTranscript: String, onEditTranscript: (String,String) -> Unit, onRestoreTranscript: () -> Unit,
+    onAi: (String,Int,Int) -> Unit, aiBusy: Boolean, aiInstalled: Boolean, aiProgress: String, onCancelAi: () -> Unit) {
     val context = LocalContext.current
     var placementMenu by remember { mutableStateOf(false) }
-    var selected by remember { mutableStateOf(emptySet<Long>()) }
-    val list = rememberLazyListState()
-    var following by remember { mutableStateOf(true) }
-    val dragging by list.interactionSource.collectIsDraggedAsState()
-    LaunchedEffect(dragging) {
-        if (dragging) following = false
-        else if (!list.canScrollForward) following = true
-    }
-    LaunchedEffect(entries.size, partial) {
-        val last = entries.size - 1 + if (partial.isNotBlank()) 1 else 0
-        if (following && last >= 0) list.animateScrollToItem(last)
-    }
+    var showOriginal by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    val shown = if(showOriginal) originalTranscript else transcriptValue
+    var value by remember { mutableStateOf(TextFieldValue(shown)) }
+    LaunchedEffect(shown) { if(value.text!=shown) value=value.copy(text=shown,selection=androidx.compose.ui.text.TextRange(value.selection.start.coerceAtMost(shown.length),value.selection.end.coerceAtMost(shown.length)),composition=null) }
+    val scroll=rememberScrollState(); var following by remember { mutableStateOf(true) }
+    val dragging by scroll.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(dragging) { if(dragging) following=false else if(scroll.value>=scroll.maxValue-20)following=true }
+    LaunchedEffect(shown,partial,scroll.maxValue) { if(following && value.selection.collapsed && !editing)scroll.animateScrollTo(scroll.maxValue) }
+    val selected = !value.selection.collapsed
+    val fragment=if(selected) value.text.substring(value.selection.min,value.selection.max) else value.text
     Surface(modifier, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 4.dp else 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f).then(dragHandle)) {
-                    Text("Transcripción", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                }
-                IconButton(onClick = { Clipboard.copy(context, "Transcripción", entries.joinToString("\n\n") { it.text }) }, enabled = entries.isNotEmpty(), modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.ContentCopy, "Copiar transcripción completa", Modifier.size(20.dp)) }
-                IconButton(onClick = onExport, enabled = entries.isNotEmpty() || partial.isNotBlank(), modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.Download, "Exportar transcripción a TXT", Modifier.size(20.dp)) }
+        Column(Modifier.padding(horizontal = if(compact)8.dp else 12.dp,vertical=if(compact)4.dp else 10.dp)) {
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Text("Transcripción",Modifier.weight(1f).then(dragHandle),style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold)
+                IconButton(onClick=onExport,enabled=shown.isNotBlank() || partial.isNotBlank(),modifier=Modifier.size(36.dp)) { Icon(Icons.Filled.Download,"Exportar transcripción a TXT",Modifier.size(20.dp)) }
                 Box {
-                    IconButton(onClick = { placementMenu = true }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.OpenWith, "Ubicación y tamaño del panel", Modifier.size(20.dp)) }
-                    DropdownMenu(placementMenu, { placementMenu = false }) {
-                        VoiceDock.entries.forEach { position -> DropdownMenuItem(text = { Text(position.label) },
-                            onClick = { onDock(position); placementMenu = false }, leadingIcon = { if (dock == position) Icon(Icons.Filled.Check, null) }) }
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text("Cambiar tamaño") }, onClick = { onResize(); placementMenu = false })
+                    IconButton(onClick={placementMenu=true},modifier=Modifier.size(36.dp)) { Icon(Icons.Filled.OpenWith,"Ubicación y tamaño del panel",Modifier.size(20.dp)) }
+                    DropdownMenu(placementMenu,{placementMenu=false}) {
+                        VoiceDock.entries.forEach { position -> DropdownMenuItem(text={Text(position.label)},onClick={onDock(position);placementMenu=false},leadingIcon={if(dock==position)Icon(Icons.Filled.Check,null)}) }
+                        HorizontalDivider(); DropdownMenuItem(text={Text("Cambiar tamaño")},onClick={onResize();placementMenu=false})
                     }
                 }
-                IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.ExpandMore, "Cerrar transcripción", Modifier.size(22.dp)) }
+                IconButton(onClick=onClose,modifier=Modifier.size(36.dp)) { Icon(Icons.Filled.ExpandMore,"Cerrar transcripción",Modifier.size(22.dp)) }
             }
-            if (!compact) Text(if (automatic) "Las frases confirmadas pasan a tu nota" else "Selecciona palabras o varios fragmentos",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (references.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                references.takeLast(4).forEach { ref -> AssistChip(onClick = { onReference(ref) }, label = { Text(ref.label) }) }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),verticalAlignment=Alignment.CenterVertically) {
+                TextButton(onClick={Clipboard.copy(context,"Transcripción",fragment)},enabled=fragment.isNotBlank()) { Text(if(selected)"Copiar selección" else "Copiar todo") }
+                TextButton(onClick={
+                    if(selected || showOriginal || transcriptValue != com.eliadca.talks.core.notes.continuousText(entries.map { it.text }))onInsert(fragment)
+                    else onAdd(entries.filterNot { it.added }.map { it.id }.toSet())
+                },enabled=fragment.isNotBlank() && (selected || showOriginal || entries.any { !it.added } || transcriptValue != com.eliadca.talks.core.notes.continuousText(entries.map { it.text }))) { Text(if(selected)"Añadir selección" else "Añadir todo") }
+                IconToggleButton(editing,{editing=it;showOriginal=false},enabled=shown.isNotBlank()) { Icon(Icons.Filled.Edit,"Editar transcripción") }
+                if(originalTranscript!=transcriptValue) IconToggleButton(showOriginal,{showOriginal=it;editing=false}) { Icon(Icons.Filled.History,"Ver transcripción original") }
             }
-            if (suggestions.isNotEmpty()) {
-                Text("¿Te referías a…?", style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    suggestions.takeLast(3).forEach { suggestion -> AssistChip(onClick = { onReference(suggestion.reference) }, label = { Text(suggestion.reference.label) }) }
-                }
+            if(!compact) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text(if(editing)"Edita el texto; el original se conserva." else if(showOriginal)"Original del motor de voz" else "Mantén pulsado para seleccionar cualquier parte.",Modifier.weight(1f),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                if(showOriginal) TextButton(onClick={onRestoreTranscript();showOriginal=false}) { Text("Restaurar") }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onAdd(if (selected.isNotEmpty()) selected else entries.filterNot { it.added }.map { it.id }.toSet()); selected = emptySet() },
-                    enabled = entries.any { !it.added }, modifier = if (compact) Modifier.height(32.dp) else Modifier) {
-                    Icon(Icons.Filled.Add, null, Modifier.size(16.dp)); Text(if (selected.isEmpty()) "Añadir todo" else "Añadir selección (${selected.size})")
-                }
-                if (selected.isNotEmpty()) TextButton(onClick = { selected = emptySet() }) { Text("Cancelar") }
-                if (!following) {
-                    val scope = rememberCoroutineScope()
-                    IconButton(onClick = {
-                        following = true
-                        scope.launch { list.animateScrollToItem((entries.size - 1 + if (partial.isNotBlank()) 1 else 0).coerceAtLeast(0)) }
-                    }) { Icon(Icons.Filled.VerticalAlignBottom, "Ver lo último") }
-                }
+            if(aiBusy) Row(verticalAlignment=Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp); Text(aiProgress.ifBlank {"Revisando…"},Modifier.weight(1f).padding(start=8.dp),style=MaterialTheme.typography.labelMedium)
+                TextButton(onClick=onCancelAi) {Text("Cancelar")}
+            } else TextButton(onClick={onAi(transcriptValue,if(selected && !showOriginal)value.selection.min else 0,if(selected && !showOriginal)value.selection.max else transcriptValue.length)},enabled=(!aiInstalled || transcriptValue.isNotBlank()) && !showOriginal) {
+                Icon(Icons.Filled.AutoAwesome,null,Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(if(aiInstalled)"Revisar con IA" else "IA local · instalar")
+            }
+            if(!compact && (references.isNotEmpty() || suggestions.isNotEmpty())) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                references.takeLast(3).forEach { ref -> AssistChip(onClick={onReference(ref)},label={Text(ref.label)}) }
+                suggestions.takeLast(2).forEach { suggestion -> AssistChip(onClick={onReference(suggestion.reference)},label={Text("¿${suggestion.reference.label}?")}) }
             }
             HorizontalDivider()
-            LazyColumn(Modifier.weight(1f).testTag("transcript"), state = list, contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (entries.isEmpty() && partial.isEmpty()) item {
-                    Column(Modifier.padding(20.dp)) {
-                        Icon(Icons.Filled.MicNone, null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(12.dp)); Text("Lo que se diga aparecerá aquí.", style = MaterialTheme.typography.bodyLarge)
-                        Spacer(Modifier.height(8.dp)); Text("Toca Escuchar para empezar. Podrás copiar frases completas o seleccionar solo las palabras que te interesan.",
-                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(12.dp).testTag("transcript")) {
+                if(shown.isBlank() && partial.isBlank()) Column {
+                    Icon(Icons.Filled.MicNone,null,tint=MaterialTheme.colorScheme.primary); Spacer(Modifier.height(12.dp))
+                    Text("Toca Escuchar y habla con naturalidad.",style=MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.height(8.dp)); Text("Verás un texto continuo. Selecciona palabras para copiarlas o añadirlas a la nota. La IA propone correcciones que puedes revisar.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                items(entries, key = { it.id }) { entry ->
-                    TranscriptCard(entry, entry.id in selected, { selected = if (it) selected + entry.id else selected - entry.id },
-                        onAdd = { onAdd(setOf(entry.id)) }, onInsert = onInsert)
-                }
-                if (partial.isNotBlank()) item {
-                    Text(partial, modifier = Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyLarge)
-                    Text("Reconociendo…", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 12.dp))
-                }
+                BasicTextField(value,{next->value=next;if(editing && next.text!=shown)onEditTranscript(next.text,shown)},readOnly=!editing || showOriginal,
+                    modifier=Modifier.fillMaxWidth().testTag("transcript-text"),textStyle=MaterialTheme.typography.bodyLarge.copy(fontSize=17.sp,lineHeight=26.sp,color=MaterialTheme.colorScheme.onSurface))
+                if(partial.isNotBlank() && !showOriginal) Text(partial,Modifier.padding(top=6.dp).testTag("transcript-live"),style=MaterialTheme.typography.bodyLarge.copy(fontStyle=androidx.compose.ui.text.font.FontStyle.Italic),color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            if(!following) { val scope=rememberCoroutineScope(); TextButton(onClick={following=true;scope.launch {scroll.animateScrollTo(scroll.maxValue)}}) {Text("Ver lo último")} }
         }
     }
 }
 
 @Composable
-private fun TranscriptCard(entry: TranscriptEntry, selected: Boolean, onSelected: (Boolean) -> Unit, onAdd: () -> Unit, onInsert: (String) -> Unit) {
-    val context = LocalContext.current
-    var value by remember(entry.id, entry.text) { mutableStateOf(TextFieldValue(entry.text)) }
-    var originalVisible by remember(entry.id) { mutableStateOf(false) }
-    val fragment = if (value.selection.collapsed) entry.text else entry.text.substring(value.selection.min, value.selection.max)
-    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(10.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
-                Checkbox(selected, onSelected, enabled = !entry.added, modifier = Modifier.size(38.dp))
-                BasicTextField(value, { value = it }, readOnly = true,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    modifier = Modifier.weight(1f).padding(8.dp).testTag("fragment-${entry.id}"))
-            }
-            if (entry.originalText != null) {
-                TextButton(onClick = { originalVisible = !originalVisible }) { Text(if (originalVisible) "Ocultar original" else "Nombre bíblico corregido · ver original") }
-                if (originalVisible) SelectionContainer { Text(entry.originalText, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp)) }
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
-                if (!entry.confirmed) Text("Sin confirmar", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                TextButton(onClick = { Clipboard.copy(context, "Transcripción", fragment) }) { Text(if (value.selection.collapsed) "Copiar" else "Copiar selección") }
-                TextButton(onClick = { if (value.selection.collapsed) onAdd() else onInsert(fragment) }, enabled = !entry.added || !value.selection.collapsed) {
-                    Text(if (!value.selection.collapsed) "Añadir selección" else if (entry.added) "Añadido" else "Añadir")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MicrophoneBar(listening: Boolean, state: EngineState, automatic: Boolean, level: Float, onAuto: (Boolean) -> Unit, onToggle: () -> Unit, compact: Boolean = false) {
+private fun MicrophoneBar(listening: Boolean, state: EngineState, automatic: Boolean, level: Float, onAuto: (Boolean) -> Unit, onToggle: () -> Unit, compact: Boolean = false, voiceLabel: String = "Voz", onVoiceOptions: () -> Unit = {}) {
     Surface(shadowElevation = 8.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (compact) 6.dp else 10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
@@ -532,6 +507,7 @@ private fun MicrophoneBar(listening: Boolean, state: EngineState, automatic: Boo
                 Text("Automático", style = MaterialTheme.typography.labelSmall)
             }
         }
+        TextButton(onClick=onVoiceOptions,modifier=Modifier.height(32.dp)) {Icon(Icons.Filled.Tune,null,Modifier.size(16.dp));Spacer(Modifier.width(6.dp));Text(voiceLabel,style=MaterialTheme.typography.labelMedium)}
         if (!compact) Text(if (!listening) "Micrófono pausado" else when (state) {
             EngineState.STARTING -> "Iniciando…"
             EngineState.RESTARTING -> "Reconectando…"

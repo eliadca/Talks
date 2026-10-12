@@ -549,7 +549,7 @@ class AppFlowTest {
         waitForText("Escuchando")
         fake.hear("Una idea importante para guardar", final = true)
         waitForText("Una idea importante para guardar")
-        clickVisible("Añadir")
+        clickVisible("Añadir todo")
         compose.onNodeWithTag("note-body").assertTextContains("Una idea importante para guardar")
         compose.onNodeWithContentDescription("Añadir automáticamente").performClick()
         fake.hear("Leamos Jhan capítulo tres versículo dieciséis", final = true)

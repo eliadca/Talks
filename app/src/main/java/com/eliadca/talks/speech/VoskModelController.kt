@@ -21,7 +21,7 @@ class VoskModelController(val manager: VoskModelManager, private val scope: Coro
 
     private var job: Job? = null
 
-    private val busy: Boolean get() = job?.isActive == true
+    private val busy: Boolean get() = job?.isCompleted == false
 
     fun download() {
         if (busy) return
@@ -34,8 +34,9 @@ class VoskModelController(val manager: VoskModelManager, private val scope: Coro
     }
 
     fun cancel() {
-        job?.cancel()
-        mutableProgress.value = null
+        val previous=job ?: return
+        previous.cancel()
+        scope.launch { previous.join(); if(job===previous)mutableProgress.value=null }
     }
 
     fun remove() {

@@ -72,7 +72,7 @@ class NotesViewModelTest {
             vm.edit(TextFieldValue("Texto que estoy editando", TextRange(2, 8)))
             vm.automatic(true)
             engine.final("Una segunda idea"); until { vm.entries.size == 2 }
-            assertEquals("Texto que estoy editando\n\nUna segunda idea", vm.body.text)
+            assertEquals("Texto que estoy editando Una segunda idea", vm.body.text)
             assertEquals(TextRange(2, 8), vm.body.selection)
             assertTrue(vm.entries.last().added)
             engine.partial("Últimas palabras"); until { vm.partial.isNotEmpty() }
@@ -197,6 +197,27 @@ class NotesViewModelTest {
         }
     }
 
+    @Test fun reviewedContinuousTextAppendsNewSpeechAndMovingRichTextIsOneUndo() {
+        val vm=NotesViewModel(app);val store=ViewModelStore().also {it.put("notes",vm)}
+        val engine=Engine();app.container.speechEngineFactory={engine}
+        try {
+            vm.create();until {vm.note!=null};val id=vm.note!!.id
+            vm.start();until {vm.engineState==EngineState.LISTENING}
+            engine.final("primera idea");until {vm.entries.size==1};engine.final("segunda idea");until {vm.entries.size==2}
+            assertEquals("primera idea segunda idea",vm.transcriptText)
+            vm.editTranscript("Primera idea. Segunda idea.",assisted=true)
+            engine.final("Y seguimos");until {vm.entries.size==3}
+            assertEquals("Primera idea. Segunda idea. Y seguimos",vm.exportTranscript())
+            assertEquals("primera idea segunda idea Y seguimos",vm.originalTranscript)
+            vm.edit(TextFieldValue("Mi idea importante",TextRange(3,7)));vm.formatText {it.copy(bold=true)}
+            vm.moveTextSelection();assertEquals("Mi  importante",vm.body.text)
+            assertEquals("idea",vm.ink.textBoxes.single().text);assertTrue(vm.ink.textBoxes.single().formatting.styleAt(0).bold)
+            vm.undoInk();assertEquals("Mi idea importante",vm.body.text);assertTrue(vm.ink.textBoxes.isEmpty())
+            vm.redoText();assertEquals("idea",vm.ink.textBoxes.single().text)
+            vm.pause();vm.backToList();vm.open(id);until {vm.note?.id==id}
+            assertEquals("Primera idea. Segunda idea. Y seguimos",vm.transcriptText)
+        } finally {store.clear();runBlocking {app.container.notes.flush()};app.container.scope.cancel();app.container.database.close();app.container.speechEngineFactory=null}
+    }
     @Test fun richTextUndoRedoAndFormattingSurviveReopeningAlongsideDrawing() {
         val vm = NotesViewModel(app); val store = ViewModelStore().also { it.put("notes", vm) }
         try {
