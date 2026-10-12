@@ -8,6 +8,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -30,7 +34,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -38,12 +44,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.eliadca.talks.bible.BiblePassage
+import com.eliadca.talks.R
 import com.eliadca.talks.core.bible.BibleReference
+import com.eliadca.talks.core.bible.BibleReferenceSuggestion
 import com.eliadca.talks.core.text.SpanishText
 import com.eliadca.talks.core.ink.InkDocument
 import com.eliadca.talks.data.db.NoteListItem
@@ -98,31 +107,27 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
             } else {
                 OutlinedTextField(value = vm.note!!.title, onValueChange = vm::title, label = { Text("Título de la nota") },
                     singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
-                if (vm.detected.isNotEmpty() && vm.citationsEnabled) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(max = 48.dp)
-                        .horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        vm.detected.forEach { ref -> AssistChip(onClick = { if (vm.bible == null) bibleOptions = true else vm.showReference(ref) },
-                            label = { Text(ref.label) }, leadingIcon = { Icon(Icons.Filled.MenuBook, null, Modifier.size(16.dp)) }) }
-                    }
-                }
                 key(vm.note!!.id) {
                     NotesWorkspace(entries = vm.entries, partial = vm.partial, body = vm.body,
                         automatic = vm.note!!.automatic, wide = wide, onEdit = vm::edit, onAdd = vm::addEntries, onInsert = vm::insert,
                         ink = vm.ink, onInkChange = vm::editInk, canUndoInk = vm.canUndoInk, canRedoInk = vm.canRedoInk,
                         onUndoInk = vm::undoInk, onRedoInk = vm::redoInk,
+                        listening = vm.listening, engineState = vm.engineState, level = vm.level, onAuto = vm::automatic,
+                        onReference = { if (vm.bible == null) bibleOptions = true else vm.showReference(it) },
+                        references = vm.detected, suggestions = vm.referenceSuggestions,
+                        allowBack = allowBack,
+                        onToggleListen = {
+                            if (vm.listening) vm.pause()
+                            else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.start()
+                            else permission.launch(Manifest.permission.RECORD_AUDIO)
+                        },
                         modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
                 }
-                MicrophoneBar(vm.listening, vm.engineState, vm.note!!.automatic, vm.level, vm::automatic,
-                    onToggle = {
-                        if (vm.listening) vm.pause()
-                        else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.start()
-                        else permission.launch(Manifest.permission.RECORD_AUDIO)
-                    })
             }
         }
         vm.passage?.let { passage ->
             FloatingPassage(passage, vm.passageExpanded, vm::expandPassage, vm::dismissPassage, vm::addPassage,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(start = 16.dp, end = 16.dp, bottom = 98.dp)
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 16.dp, end = 16.dp, bottom = 88.dp)
                     .width(minOf(420.dp, maxWidth - 32.dp)))
         }
     }
@@ -198,35 +203,62 @@ private fun NoteLibrary(notes: List<NoteListItem>, onOpen: (Long) -> Unit, onDel
     }
 }
 
-/** Responsive two-panel workspace. On a phone, switching panels keeps the microphone running. */
+/** The page stays central; voice lives in a right-hand panel opened explicitly by its microphone. */
 @Composable
 fun NotesWorkspace(
     entries: List<TranscriptEntry>, partial: String, body: TextFieldValue, automatic: Boolean, wide: Boolean,
     onEdit: (TextFieldValue) -> Unit, onAdd: (Set<Long>) -> Unit, onInsert: (String) -> Unit, modifier: Modifier = Modifier,
     ink: InkDocument = InkDocument(), onInkChange: (InkDocument) -> Unit = {},
     canUndoInk: Boolean = false, canRedoInk: Boolean = false, onUndoInk: () -> Unit = {}, onRedoInk: () -> Unit = {},
+    listening: Boolean = false, engineState: EngineState = EngineState.IDLE, level: Float = 0f,
+    onAuto: (Boolean) -> Unit = {}, onToggleListen: () -> Unit = {}, onReference: (BibleReference) -> Unit = {},
+    references: List<BibleReference> = emptyList(), suggestions: List<BibleReferenceSuggestion> = emptyList(),
+    allowBack: Boolean = true,
 ) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
-    if (wide) {
-        Row(modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TranscriptPanel(entries, partial, automatic, onAdd, onInsert, Modifier.weight(1f).fillMaxHeight())
-            HandwritingNotePanel(body, onEdit, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk, Modifier.weight(1f).fillMaxHeight())
-        }
-    } else {
-        Column(modifier.fillMaxSize()) {
-            TabRow(tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Transcripción") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Mi nota") })
+    var panelOpen by rememberSaveable { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    BackHandler(panelOpen && allowBack) { panelOpen = false }
+    BoxWithConstraints(modifier.fillMaxSize().imePadding()) {
+        val panelWidth = if (wide) minOf(420.dp, maxWidth * .4f) else minOf(420.dp, maxWidth - 20.dp)
+        @Composable fun voicePanel(panelModifier: Modifier) {
+            Surface(panelModifier.testTag("voice-panel"), shape = RoundedCornerShape(22.dp), shadowElevation = 12.dp,
+                color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                Column {
+                    TranscriptPanel(entries, partial, automatic, onAdd, onInsert, Modifier.weight(1f).fillMaxWidth(),
+                        onClose = { panelOpen = false }, references = references, suggestions = suggestions, onReference = onReference)
+                    MicrophoneBar(listening, engineState, automatic, level, onAuto, onToggleListen)
+                }
             }
-            if (tab == 0) TranscriptPanel(entries, partial, automatic, onAdd, onInsert, Modifier.weight(1f).fillMaxWidth())
-            else HandwritingNotePanel(body, onEdit, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk, Modifier.weight(1f).fillMaxWidth())
+        }
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HandwritingNotePanel(body, onEdit, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk,
+                Modifier.weight(1f).fillMaxHeight().padding(bottom = if (panelOpen) 0.dp else 76.dp), onReference = onReference)
+            if (wide && panelOpen) voicePanel(Modifier.width(panelWidth).fillMaxHeight())
+        }
+        if (!wide) {
+            AnimatedVisibility(panelOpen, modifier = Modifier.align(Alignment.CenterEnd),
+                enter = slideInHorizontally { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut()) {
+                voicePanel(Modifier.width(panelWidth).fillMaxHeight())
+            }
+        }
+        if (!panelOpen) {
+            FloatingActionButton(onClick = { keyboard?.hide(); panelOpen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+                .semantics { stateDescription = if (listening) "Escuchando" else "Micrófono pausado" },
+                shape = RoundedCornerShape(22.dp), containerColor = MaterialTheme.colorScheme.primary) {
+                Box {
+                    Icon(painterResource(R.drawable.ic_note_microphone), "Abrir transcripción", Modifier.size(36.dp), tint = androidx.compose.ui.graphics.Color.Unspecified)
+                    if (listening) Box(Modifier.align(Alignment.TopEnd).size(8.dp)
+                        .background(MaterialTheme.colorScheme.tertiary, androidx.compose.foundation.shape.CircleShape))
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, automatic: Boolean, onAdd: (Set<Long>) -> Unit,
-    onInsert: (String) -> Unit, modifier: Modifier) {
+    onInsert: (String) -> Unit, modifier: Modifier, onClose: () -> Unit, references: List<BibleReference>,
+    suggestions: List<BibleReferenceSuggestion>, onReference: (BibleReference) -> Unit) {
     val context = LocalContext.current
     var selected by remember { mutableStateOf(emptySet<Long>()) }
     val list = rememberLazyListState()
@@ -250,6 +282,16 @@ private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, aut
                 }
                 IconButton(onClick = { Clipboard.copy(context, "Transcripción", entries.joinToString("\n\n") { it.text }) }, enabled = entries.isNotEmpty()) {
                     Icon(Icons.Filled.ContentCopy, "Copiar transcripción completa")
+                }
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Cerrar transcripción") }
+            }
+            if (references.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                references.takeLast(4).forEach { ref -> AssistChip(onClick = { onReference(ref) }, label = { Text(ref.label) }) }
+            }
+            if (suggestions.isNotEmpty()) {
+                Text("¿Te referías a…?", style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    suggestions.takeLast(3).forEach { suggestion -> AssistChip(onClick = { onReference(suggestion.reference) }, label = { Text(suggestion.reference.label) }) }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -294,6 +336,7 @@ private fun TranscriptPanel(entries: List<TranscriptEntry>, partial: String, aut
 private fun TranscriptCard(entry: TranscriptEntry, selected: Boolean, onSelected: (Boolean) -> Unit, onAdd: () -> Unit, onInsert: (String) -> Unit) {
     val context = LocalContext.current
     var value by remember(entry.id, entry.text) { mutableStateOf(TextFieldValue(entry.text)) }
+    var originalVisible by remember(entry.id) { mutableStateOf(false) }
     val fragment = if (value.selection.collapsed) entry.text else entry.text.substring(value.selection.min, value.selection.max)
     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(10.dp)) {
@@ -302,6 +345,11 @@ private fun TranscriptCard(entry: TranscriptEntry, selected: Boolean, onSelected
                 BasicTextField(value, { value = it }, readOnly = true,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                     modifier = Modifier.weight(1f).padding(8.dp).testTag("fragment-${entry.id}"))
+            }
+            if (entry.originalText != null) {
+                TextButton(onClick = { originalVisible = !originalVisible }) { Text(if (originalVisible) "Ocultar original" else "Nombre bíblico corregido · ver original") }
+                if (originalVisible) SelectionContainer { Text(entry.originalText, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp)) }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
                 if (!entry.confirmed) Text("Sin confirmar", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
@@ -317,24 +365,25 @@ private fun TranscriptCard(entry: TranscriptEntry, selected: Boolean, onSelected
 @Composable
 private fun MicrophoneBar(listening: Boolean, state: EngineState, automatic: Boolean, level: Float, onAuto: (Boolean) -> Unit, onToggle: () -> Unit) {
     Surface(shadowElevation = 8.dp) {
-        Row(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onToggle) {
                 Icon(if (listening) Icons.Filled.Pause else Icons.Filled.Mic, null, Modifier.size(20.dp))
                 Spacer(Modifier.width(6.dp)); Text(if (listening) "Pausar" else "Escuchar")
             }
-            Column(Modifier.weight(1f)) {
-                Text(if (!listening) "Micrófono pausado" else when (state) {
-                    EngineState.STARTING -> "Iniciando…"
-                    EngineState.RESTARTING -> "Reconectando…"
-                    else -> "Escuchando"
-                }, style = MaterialTheme.typography.labelMedium)
-                if (listening) LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(3.dp))
-            }
+            Spacer(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Switch(automatic, onAuto, modifier = Modifier.height(32.dp).semantics { contentDescription = "Añadir automáticamente" })
                 Text("Automático", style = MaterialTheme.typography.labelSmall)
             }
+        }
+        Text(if (!listening) "Micrófono pausado" else when (state) {
+            EngineState.STARTING -> "Iniciando…"
+            EngineState.RESTARTING -> "Reconectando…"
+            else -> "Escuchando"
+        }, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+        if (listening) LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(3.dp))
         }
     }
 }

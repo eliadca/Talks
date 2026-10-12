@@ -17,8 +17,8 @@ android {
         applicationId = "com.eliadca.talks"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Galaxy Tab S-series are arm64. x86_64 is kept for emulators.

@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.eliadca.talks.core.ink.InkDocument
 import com.eliadca.talks.core.ink.PenKind
+import com.eliadca.talks.core.bible.BibleReference
 import com.eliadca.talks.export.Clipboard
 import kotlin.math.max
 
@@ -42,6 +43,7 @@ fun HandwritingNotePanel(
     body: TextFieldValue, onEdit: (TextFieldValue) -> Unit, ink: InkDocument,
     onInkChange: (InkDocument) -> Unit, canUndo: Boolean, canRedo: Boolean,
     onUndo: () -> Unit, onRedo: () -> Unit, modifier: Modifier = Modifier,
+    onReference: (BibleReference) -> Unit = {},
 ) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -71,7 +73,7 @@ fun HandwritingNotePanel(
                 IconToggleButton(tool == InkTool.MOVE, { choose(InkTool.MOVE) }) { Icon(Icons.Filled.PanTool, "Mover la página") }
                 IconButton(onClick = onUndo, enabled = canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Deshacer escritura") }
                 IconButton(onClick = onRedo, enabled = canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, "Rehacer escritura") }
-                IconButton(onClick = { settings = true }) { Icon(Icons.Filled.Tune, "Tipo, grosor y color del lápiz", tint = Color(color)) }
+                IconButton(onClick = { settings = true }) { Icon(Icons.Filled.Tune, "Tipo, grosor y color del lápiz") }
                 IconButton(onClick = { rules = true }) { Icon(Icons.Filled.FormatLineSpacing, "Renglones") }
             }
             if (tool == InkTool.PEN || tool == InkTool.ERASER || tool == InkTool.RULE_AREA) {
@@ -84,7 +86,7 @@ fun HandwritingNotePanel(
             }
             HorizontalDivider()
             NotebookPage(body, onEdit, ink, onInkChange, tool, pen, color, width, pressure, stylusOnly,
-                onAreaFinished = { choose(InkTool.PEN) }, modifier = Modifier.weight(1f).fillMaxWidth())
+                onAreaFinished = { choose(InkTool.PEN) }, onReference = onReference, modifier = Modifier.weight(1f).fillMaxWidth())
         }
     }
     if (settings) {
@@ -175,16 +177,17 @@ private fun PenOptions(pen: PenKind, color: Int, width: Float, pressure: Boolean
 @Composable
 private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit, ink: InkDocument,
     onInkChange: (InkDocument) -> Unit, tool: InkTool, pen: PenKind, color: Int, width: Float,
-    pressure: Boolean, stylusOnly: Boolean, onAreaFinished: () -> Unit, modifier: Modifier) {
+    pressure: Boolean, stylusOnly: Boolean, onAreaFinished: () -> Unit, onReference: (BibleReference) -> Unit, modifier: Modifier) {
     val density = LocalDensity.current
     var textHeight by remember { mutableFloatStateOf(0f) }
     val ruleColor = MaterialTheme.colorScheme.primary.toArgb()
     BoxWithConstraints(modifier) {
-        val factor = maxWidth.value / InkDocument.PAGE_WIDTH
+        val paperWidth = minOf(maxWidth, 640.dp)
+        val factor = paperWidth.value / InkDocument.PAGE_WIDTH
         val worldHeight = max(ink.height, textHeight + 300)
         val pageHeight = (worldHeight * factor).dp
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).testTag("note-page-scroll")) {
-            Box(Modifier.fillMaxWidth().height(pageHeight).background(MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).testTag("note-page-scroll"), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.width(paperWidth).height(pageHeight).background(MaterialTheme.colorScheme.surface)) {
                 @Composable fun inkLayer() {
                     AndroidView(factory = { InkPageView(it) }, modifier = Modifier.fillMaxSize().testTag("ink-page"), update = {
                         it.document = ink; it.tool = tool; it.pen = pen; it.penColor = color; it.penWidth = width
@@ -194,7 +197,7 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
                 }
                 val writing = tool == InkTool.PEN || tool == InkTool.ERASER || tool == InkTool.RULE_AREA
                 if (!writing) inkLayer()
-                BasicTextField(body, onEdit, readOnly = tool != InkTool.TEXT,
+                BibleLinkedTextField(body, onEdit, readOnly = tool != InkTool.TEXT, linksEnabled = !writing, onReference = onReference,
                     modifier = Modifier.fillMaxWidth().padding((40 * factor).dp).testTag("note-body"),
                     textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = (46 * factor).sp,
                         lineHeight = (64 * factor).sp, color = MaterialTheme.colorScheme.onSurface),
@@ -209,7 +212,7 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
                     })
                 if (writing) inkLayer()
             }
-            OutlinedButton(onClick = { onInkChange(ink.copy(height = worldHeight + 1000)) }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            OutlinedButton(onClick = { onInkChange(ink.copy(height = worldHeight + 1000)) }, modifier = Modifier.width(paperWidth).padding(vertical = 8.dp)) {
                 Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Añadir espacio a la página")
             }
         }

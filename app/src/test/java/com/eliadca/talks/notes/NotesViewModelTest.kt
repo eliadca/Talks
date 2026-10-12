@@ -22,6 +22,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.time.Duration
+import android.database.sqlite.SQLiteDatabase
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -107,6 +109,55 @@ class NotesViewModelTest {
             vm.toggleCitations(false)
             engine.final("Génesis uno uno"); until { vm.entries.size == 3 }
             assertTrue(vm.detected.isEmpty())
+        } finally {
+            store.clear(); runBlocking { app.container.notes.flush() }
+            app.container.scope.cancel(); app.container.database.close(); app.container.speechEngineFactory = null
+        }
+    }
+
+    @Test fun aMisheardBookIsCorrectedOfflineAndItsPassageCanStillBeOpenedWithVoiceDetectionOff() {
+        val file = File(app.filesDir, "study-bible.sqlite"); file.delete()
+        SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
+            db.execSQL("CREATE TABLE verses (book INTEGER, chapter INTEGER, verse INTEGER, text TEXT)")
+            db.execSQL("INSERT INTO verses VALUES (49,2,8,'Texto de prueba para Efesios')")
+            db.execSQL("CREATE TABLE edition (title TEXT, verses INTEGER)")
+            db.execSQL("INSERT INTO edition VALUES ('Biblia de Estudio',1)")
+        }
+        val vm = NotesViewModel(app)
+        val store = ViewModelStore().also { it.put("notes", vm) }
+        val engine = Engine(); app.container.speechEngineFactory = { engine }
+        try {
+            vm.create(); until { vm.note != null }
+            vm.automatic(true); vm.start(); until { vm.engineState == EngineState.LISTENING }
+            engine.final("Leamos Efecios capítulo dos versículo ocho")
+            until { vm.passage != null }
+            assertEquals("Leamos Efesios capítulo dos versículo ocho", vm.entries.single().text)
+            assertEquals("Leamos Efecios capítulo dos versículo ocho", vm.entries.single().originalText)
+            assertTrue(vm.body.text.contains("Efesios")); assertFalse(vm.body.text.contains("Efecios"))
+            vm.toggleCitations(false); assertNull(vm.passage)
+            vm.showReference(BibleReference(49, 2, 8)); until { vm.passage != null }
+            assertTrue(vm.passage!!.text.contains("Texto de prueba para Efesios"))
+            val id = vm.note!!.id
+            vm.backToList(); vm.open(id); until { vm.note != null }
+            assertEquals("Leamos Efecios capítulo dos versículo ocho", vm.entries.single().originalText)
+        } finally {
+            store.clear(); runBlocking { app.container.notes.flush() }
+            app.container.scope.cancel(); app.container.database.close(); app.container.speechEngineFactory = null; file.delete()
+        }
+    }
+
+    @Test fun ambiguousSpokenNamesStayUnchangedAndOfferChoicesInsteadOfOpeningAPassage() {
+        val vm = NotesViewModel(app)
+        val store = ViewModelStore().also { it.put("notes", vm) }
+        val engine = Engine(); app.container.speechEngineFactory = { engine }
+        try {
+            vm.create(); until { vm.note != null }
+            vm.start(); until { vm.engineState == EngineState.LISTENING }
+            engine.final("jon capítulo uno versículo uno")
+            until { vm.referenceSuggestions.isNotEmpty() }
+            assertTrue(vm.detected.isEmpty()); assertNull(vm.passage)
+            assertEquals("jon capítulo uno versículo uno", vm.entries.single().text)
+            assertNull(vm.entries.single().originalText)
         } finally {
             store.clear(); runBlocking { app.container.notes.flush() }
             app.container.scope.cancel(); app.container.database.close(); app.container.speechEngineFactory = null

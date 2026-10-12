@@ -17,6 +17,11 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.assertIsEnabled
@@ -530,6 +535,8 @@ class AppFlowTest {
         clickVisible("Nueva nota")
         compose.onNodeWithText("Título de la nota").performTextInput("Ideas de reunión")
         androidx.test.espresso.Espresso.closeSoftKeyboard()
+        compose.onNodeWithTag("voice-panel").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
         clickVisible("Escuchar")
         waitForText("Escuchando")
         fake.hear("Una idea importante para guardar", final = true)
@@ -537,7 +544,7 @@ class AppFlowTest {
         clickVisible("Añadir")
         compose.onNodeWithTag("note-body").assertTextContains("Una idea importante para guardar")
         compose.onNodeWithContentDescription("Añadir automáticamente").performClick()
-        fake.hear("Leamos Juan capítulo tres versículo dieciséis", final = true)
+        fake.hear("Leamos Jhan capítulo tres versículo dieciséis", final = true)
         waitForText("Añadir a nota")
         compose.onNodeWithTag("floating-citation").assertExists()
         compose.onNodeWithText("Añadir a nota").performClick()
@@ -545,6 +552,7 @@ class AppFlowTest {
         Shots.take("notes-transcript-citation")
         compose.onNodeWithContentDescription("Cerrar cita").performClick()
         clickVisible("Pausar")
+        compose.onNodeWithContentDescription("Cerrar transcripción").performClick()
         compose.onNodeWithText("Lápiz").performClick()
         compose.onNodeWithTag("ink-page").performTouchInput {
             swipe(androidx.compose.ui.geometry.Offset(100f, 100f), androidx.compose.ui.geometry.Offset(320f, 180f), 300)
@@ -555,11 +563,23 @@ class AppFlowTest {
         waitForText("Ideas de reunión")
         clickVisible("Ideas de reunión")
         compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba", substring = true)
+        compose.waitUntil(10000) {
+            compose.onNodeWithTag("note-body").fetchSemanticsNode().config.getOrNull(SemanticsActions.CustomActions)?.isNotEmpty() == true
+        }
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        compose.onNodeWithTag("note-body").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val referencePosition = layouts.single().getBoundingBox(layouts.single().layoutInput.text.text.lastIndexOf("Juan 3:16") + 2).center
+        compose.onNodeWithTag("note-body").performTouchInput { click(referencePosition) }
+        compose.onNodeWithTag("floating-citation").assertExists()
+        compose.onNodeWithContentDescription("Cerrar cita").performClick()
+        compose.onNodeWithTag("note-body").performTouchInput { longClick(referencePosition, durationMillis = 700) }
+        compose.onNodeWithTag("floating-citation").assertDoesNotExist()
         runBlocking {
             container.notes.flush()
             val note = container.database.notes().all().single()
             assertTrue(note.body.contains("Una idea importante para guardar"))
             assertTrue(note.transcript.contains("Juan capítulo tres"))
+            assertTrue(note.transcript.contains("Jhan capítulo tres"))
             val ink = kotlinx.serialization.json.Json.decodeFromString<com.eliadca.talks.core.ink.InkDocument>(note.ink)
             assertEquals(1, ink.strokes.size)
         }

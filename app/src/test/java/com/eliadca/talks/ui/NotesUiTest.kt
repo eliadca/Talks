@@ -66,6 +66,7 @@ class NotesUiTest {
                     { selectedText = it; body = TextFieldValue(it) }, Modifier.fillMaxSize())
             }
         }
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
         compose.onNodeWithTag("fragment-1").performTextInputSelection(TextRange(3, 10))
         compose.onNodeWithText("Añadir selección").performClick()
         assertEquals("primera", selectedText)
@@ -73,7 +74,7 @@ class NotesUiTest {
         screenshot("notes-tablet")
     }
 
-    @Test fun aPhoneCanSwitchPanelsWithoutDiscardingTheTranscript() {
+    @Test fun aPhoneCanCloseAndReopenTheRightPanelWithoutDiscardingTheTranscript() {
         var added = emptySet<Long>()
         compose.setContent {
             var body by remember { mutableStateOf(TextFieldValue("")) }
@@ -84,11 +85,13 @@ class NotesUiTest {
                 }
             }
         }
+        compose.onNodeWithTag("voice-panel").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
         compose.onNodeWithText("Añadir todo").performClick()
         assertEquals(setOf(1L, 2L), added)
-        compose.onNodeWithText("Mi nota").performClick()
+        compose.onNodeWithContentDescription("Cerrar transcripción").performClick()
         compose.onNodeWithTag("note-body").assertTextContains("Mis ideas guardadas")
-        compose.onNodeWithText("Transcripción").performClick()
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
         compose.onNodeWithTag("fragment-1").assertTextContains(entries[0].text)
         screenshot("notes-phone")
     }
@@ -139,6 +142,7 @@ class NotesUiTest {
                 NotesWorkspace(transcript, "", TextFieldValue(""), false, true, {}, {}, {}, Modifier.fillMaxWidth().height(320.dp))
             }
         }
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
         compose.onNodeWithTag("fragment-12").assertIsDisplayed()
         compose.runOnIdle { transcript = transcript + TranscriptEntry(13, "Última frase confirmada") }
         compose.onNodeWithTag("fragment-13").assertIsDisplayed()
@@ -186,5 +190,58 @@ class NotesUiTest {
         compose.onNodeWithTag("ink-page").assertHeightIsAtLeast(4000.dp)
         compose.onNodeWithText("Añadir espacio a la página").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("note-body").assertTextContains("Idea 200 de la reunión", substring = true)
+    }
+
+    @Test fun thePageStartsFullWidthAndVoiceOnlyStartsFromInsideTheRightPanel() {
+        var starts = 0
+        compose.setContent {
+            var listening by remember { mutableStateOf(false) }
+            MaterialTheme {
+                NotesWorkspace(entries, "", TextFieldValue("Mis ideas"), false, true, {}, {}, {}, Modifier.fillMaxSize(),
+                    listening = listening, onToggleListen = { starts++; listening = !listening })
+            }
+        }
+        compose.onNodeWithTag("voice-panel").assertDoesNotExist()
+        compose.onNodeWithText("Escuchar").assertDoesNotExist()
+        val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+        val button = compose.onNodeWithContentDescription("Abrir transcripción").fetchSemanticsNode().boundsInRoot
+        assertTrue(button.center.x > root.width * .8f && button.center.y > root.height * .8f)
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        assertEquals(0, starts)
+        val note = compose.onNodeWithTag("note-body").fetchSemanticsNode().boundsInRoot
+        val panel = compose.onNodeWithTag("voice-panel").fetchSemanticsNode().boundsInRoot
+        assertTrue("transcription must be to the right of the note", panel.left >= note.right)
+        compose.onNodeWithText("Escuchar").performClick(); assertEquals(1, starts)
+        compose.onNodeWithContentDescription("Cerrar transcripción").performClick()
+        compose.onNodeWithTag("voice-panel").assertDoesNotExist()
+        assertEquals("closing the panel must not stop capture", 1, starts)
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        compose.onNodeWithText("Pausar").assertIsDisplayed()
+        screenshot("notes-right-panel")
+    }
+
+    @Test fun correctedBibleNamesKeepTheOriginalRecognitionAvailable() {
+        val fixed = TranscriptEntry(1, "Efesios 2:8", originalText = "Efecios 2:8")
+        compose.setContent {
+            MaterialTheme { NotesWorkspace(listOf(fixed), "", TextFieldValue(""), false, true, {}, {}, {}, Modifier.fillMaxSize()) }
+        }
+        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        compose.onNodeWithText("Nombre bíblico corregido · ver original").performClick()
+        compose.onNodeWithText("Efecios 2:8").assertIsDisplayed()
+        compose.onNodeWithTag("fragment-1").assertTextContains("Efesios 2:8")
+    }
+
+    @Test fun drawingOverAReferenceUsesThePenWithoutOpeningTheBible() {
+        var ink by mutableStateOf(InkDocument())
+        var opened: BibleReference? = null
+        compose.setContent {
+            MaterialTheme {
+                HandwritingNotePanel(TextFieldValue("Juan 3:16"), {}, ink, { ink = it }, false, false, {}, {},
+                    Modifier.width(580.dp).fillMaxHeight(), onReference = { opened = it })
+            }
+        }
+        compose.onNodeWithText("Lápiz").performClick()
+        compose.onNodeWithTag("ink-page").performTouchInput { swipe(Offset(40f, 38f), Offset(180f, 42f), 200) }
+        compose.runOnIdle { assertEquals(1, ink.strokes.size); assertEquals(null, opened) }
     }
 }

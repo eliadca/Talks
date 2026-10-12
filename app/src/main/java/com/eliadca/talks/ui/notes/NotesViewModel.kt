@@ -15,6 +15,7 @@ import com.eliadca.talks.bible.BiblePassage
 import com.eliadca.talks.container
 import com.eliadca.talks.core.bible.BibleReference
 import com.eliadca.talks.core.bible.BibleReferences
+import com.eliadca.talks.core.bible.BibleReferenceSuggestion
 import com.eliadca.talks.core.ink.InkDocument
 import com.eliadca.talks.core.ink.InkHistory
 import com.eliadca.talks.data.AppSettings
@@ -39,7 +40,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 @Serializable
-data class TranscriptEntry(val id: Long, val text: String, val added: Boolean = false, val confirmed: Boolean = true)
+data class TranscriptEntry(val id: Long, val text: String, val added: Boolean = false, val confirmed: Boolean = true,
+    val originalText: String? = null)
 
 class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
     private val services = app.container
@@ -67,6 +69,9 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
     var passage by mutableStateOf<BiblePassage?>(null); private set
     var passageExpanded by mutableStateOf(true); private set
     var detected by mutableStateOf(emptyList<BibleReference>()); private set
+    var referenceSuggestions by mutableStateOf(emptyList<BibleReferenceSuggestion>()); private set
+    private var passageFromVoice = false
+    private var referenceRequest = 0
     private var engine: SpeechEngine? = null
     private var collector: Job? = null
     private var lookup: Job? = null
@@ -107,7 +112,7 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
         catch (e: Exception) { message = "No se pudo leer la transcripción guardada."; return }
         val drawing = try { json.decodeFromString<InkDocument>(value.ink) }
         catch (e: Exception) { message = "No se pudo leer la escritura guardada. Conserva una copia de seguridad."; return }
-        lookup?.cancel(); lastDetection = null; passage = null; detected = emptyList()
+        lookup?.cancel(); referenceRequest++; lastDetection = null; passage = null; detected = emptyList(); referenceSuggestions = emptyList()
         note = value
         body = TextFieldValue(value.body, TextRange(value.body.length))
         entries = transcript
@@ -115,7 +120,7 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
         savedInk = value.ink
     }
 
-    fun backToList() { pause(); lookup?.cancel(); note = null; passage = null; detected = emptyList() }
+    fun backToList() { pause(); lookup?.cancel(); referenceRequest++; note = null; passage = null; detected = emptyList(); referenceSuggestions = emptyList() }
     fun title(value: String) { note = note?.copy(title = value.take(160)); scheduleEditSave() }
     fun edit(value: TextFieldValue) {
         val changed = value.text != body.text
@@ -137,14 +142,17 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
     fun toggleCitations(value: Boolean) {
         citationsEnabled = value
         lastDetection = null
-        if (!value) { lookup?.cancel(); passage = null; detected = emptyList() }
+        if (!value) {
+            lookup?.cancel(); detected = emptyList(); referenceSuggestions = emptyList()
+            if (passageFromVoice) { referenceRequest++; passage = null }
+        }
     }
     fun dismissMessage() { message = null }
     fun permissionDenied() {
         message = "Permite el acceso al micrófono para transcribir. Puedes activarlo en Ajustes de Android → Aplicaciones → Talks → Permisos."
     }
     fun expandPassage(value: Boolean) { passageExpanded = value }
-    fun dismissPassage() { passage = null }
+    fun dismissPassage() { referenceRequest++; passage = null }
 
     private fun scheduleEditSave() {
         editSave?.cancel()
@@ -206,10 +214,13 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
                             if (partial != event.text) { partial = event.text; detect(event.text, debounce = true) }
                         }
                         is SpeechEvent.Final -> {
-                            val text = event.text.trim()
+                            val raw = event.text.trim()
+                            val corrected = withContext(Dispatchers.Default) { BibleReferences.scan(raw).correctBookNames(raw) }
+                            if (gen != generation || !listening) return@collect
+                            val text = corrected
                             partial = ""
                             if (text.isNotEmpty()) {
-                                val entry = TranscriptEntry((entries.maxOfOrNull { it.id } ?: 0) + 1, text)
+                                val entry = TranscriptEntry((entries.maxOfOrNull { it.id } ?: 0) + 1, text, originalText = raw.takeIf { it != text })
                                 entries = entries + entry
                                 if (note?.automatic == true) {
                                     entries = entries.map { if (it.id == entry.id) it.copy(added = true) else it }
@@ -264,23 +275,32 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
         val previous = entries.takeLast(if (debounce) 1 else 2).firstOrNull()?.text.orEmpty().takeLast(180)
         lookup = viewModelScope.launch {
             if (debounce) delay(450)
-            val refs = withContext(Dispatchers.Default) { BibleReferences.find("$previous $text") }
-            if (refs.isEmpty() || note?.id != noteId) return@launch
+            val scan = withContext(Dispatchers.Default) { BibleReferences.scan("$previous $text") }
+            if (note?.id != noteId || !citationsEnabled) return@launch
+            referenceSuggestions = scan.suggestions.takeLast(3)
+            val refs = scan.matches.map { it.reference }
+            if (refs.isEmpty()) return@launch
             detected = (detected + refs).distinct().takeLast(12)
             val ref = refs.last()
             if (ref == lastDetection) return@launch
-            showReference(ref)
+            showReference(ref, fromVoice = true)
         }
     }
 
-    fun showReference(ref: BibleReference) {
+    fun showReference(ref: BibleReference, fromVoice: Boolean = false) {
         val id = note?.id ?: return
+        if (fromVoice && !citationsEnabled) return
         lastDetection = ref
+        val request = ++referenceRequest
+        passageFromVoice = fromVoice
         viewModelScope.launch {
             try {
                 val found = services.bible.passage(ref)
-                if (note?.id != id || !citationsEnabled || lastDetection != ref) return@launch
-                if (found != null) { passage = found; passageExpanded = true }
+                if (note?.id != id || request != referenceRequest || (fromVoice && !citationsEnabled)) return@launch
+                if (found != null) {
+                    passage = found; passageExpanded = true
+                    if (bible == null) bible = services.bible.info()
+                }
                 else if (bible != null) message = "${ref.label} no está disponible en la Biblia importada."
             } catch (e: Exception) { report(e) }
         }
