@@ -23,10 +23,19 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - uses: android-actions/setup-android@v3
+
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Install native toolchain
-        run: sdkmanager "ndk;28.2.13676358" "cmake;3.22.1"
+        run: |
+          for pkg in "ndk;28.2.13676358" "cmake;3.22.1"; do
+            for attempt in 1 2 3; do
+              sdkmanager --install "$pkg" && break
+              if [ "$attempt" = 3 ]; then exit 1; fi
+              sleep 5
+            done
+          done
 
       - name: Test and build
         run: |
@@ -73,6 +82,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - uses: android-actions/setup-android@v3
 
       - uses: gradle/actions/setup-gradle@v4
 
@@ -165,6 +176,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - uses: android-actions/setup-android@v3
 
       - uses: gradle/actions/setup-gradle@v4
 
