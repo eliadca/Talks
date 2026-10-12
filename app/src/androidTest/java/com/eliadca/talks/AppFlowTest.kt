@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -572,8 +573,14 @@ class AppFlowTest {
         compose.onNodeWithTag("note-body").performTouchInput { click(referencePosition) }
         compose.onNodeWithTag("floating-citation").assertExists()
         compose.onNodeWithContentDescription("Cerrar cita").performClick()
+        val versePosition = layouts.single().getBoundingBox(layouts.single().layoutInput.text.text.lastIndexOf("Texto bíblico de prueba") + 2).center
+        compose.onNodeWithTag("note-body").performTouchInput { click(versePosition) }
+        compose.onNodeWithTag("floating-citation").assertExists()
+        compose.onNodeWithContentDescription("Cerrar cita").performClick()
         compose.onNodeWithTag("note-body").performTouchInput { longClick(referencePosition, durationMillis = 700) }
         compose.onNodeWithTag("floating-citation").assertDoesNotExist()
+        assertTrue("long press must still select editable citation text",
+            !compose.onNodeWithTag("note-body").fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange].collapsed)
         runBlocking {
             container.notes.flush()
             val note = container.database.notes().all().single()

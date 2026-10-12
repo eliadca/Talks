@@ -31,9 +31,9 @@ class BibleLinkedTextFieldTest {
     private val text = "Una idea y Juan 3:16 para recordar."
     private var layout: TextLayoutResult? = null
     private var opened: BibleReference? = null
-    private fun content(enabled: Boolean = true) {
+    private fun content(enabled: Boolean = true, bodyText: String = text) {
         compose.setContent {
-            var body by remember { mutableStateOf(TextFieldValue(text)) }
+            var body by remember { mutableStateOf(TextFieldValue(bodyText)) }
             MaterialTheme {
                 BibleLinkedTextField(body, { body = it }, false, enabled, { opened = it },
                     MaterialTheme.typography.bodyLarge, { layout = it }, Modifier.width(400.dp).testTag("linked-note"))
@@ -67,5 +67,33 @@ class BibleLinkedTextFieldTest {
         compose.onNodeWithTag("linked-note").performTextReplacement("Una nota sin referencias")
         compose.waitForIdle()
         assertTrue(compose.onNodeWithTag("linked-note").fetchSemanticsNode().config[SemanticsActions.CustomActions].isEmpty())
+    }
+
+    @Test fun tappingTheVerseTextInASavedBibleBlockAlsoReopensItsPassage() {
+        val quote = "Juan 3:16\n16  Texto bíblico que se guardó.\n\nMi comentario aparte."
+        content(bodyText = quote)
+        val point = layout!!.getBoundingBox(quote.indexOf("bíblico") + 2).center
+        compose.onNodeWithTag("linked-note").performTouchInput { click(point) }
+        assertEquals(BibleReference(43, 3, 16), opened)
+    }
+
+    @Test fun aParagraphAfterTheSavedBibleQuoteIsStillNormalEditableNoteText() {
+        val quote = "Juan 3:16\n16  Texto bíblico que se guardó.\n\nMi comentario aparte."
+        content(bodyText = quote)
+        val point = layout!!.getBoundingBox(quote.indexOf("comentario") + 2).center
+        compose.onNodeWithTag("linked-note").performTouchInput { click(point) }
+        assertNull(opened)
+    }
+
+    @Test fun aMultiVerseQuoteEndsBeforeACommentEvenWithOnlyOneLineBreak() {
+        val quote = "Juan 3:16–18\n16  Primer versículo.\n17  Segundo versículo.\n18  Último versículo.\nMi comentario propio."
+        content(bodyText = quote)
+        val verse = layout!!.getBoundingBox(quote.indexOf("Último") + 2).center
+        compose.onNodeWithTag("linked-note").performTouchInput { click(verse) }
+        assertEquals(BibleReference(43, 3, 16, 18), opened)
+        compose.runOnIdle { opened = null }
+        val comment = layout!!.getBoundingBox(quote.indexOf("comentario") + 2).center
+        compose.onNodeWithTag("linked-note").performTouchInput { click(comment) }
+        assertNull(opened)
     }
 }

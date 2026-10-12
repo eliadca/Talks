@@ -31,6 +31,25 @@ import kotlinx.coroutines.withContext
 
 private data class NoteLinks(val source: String, val matches: List<BibleReferenceMatch>)
 
+/** Saved Bible passages have a reference heading and numbered verse lines; the entire quote can reopen it. */
+private fun passageEnd(text: String, match: BibleReferenceMatch): Int {
+    val lineStart = text.lastIndexOf('\n', match.start - 1) + 1
+    if (text.substring(lineStart, match.start).isNotBlank()) return match.end
+    val lineEnd = text.indexOf('\n', match.end)
+    if (lineEnd < 0 || text.substring(match.end, lineEnd).isNotBlank()) return match.end
+    var rowStart = lineEnd + 1
+    var end = match.end
+    for (verse in match.reference.firstVerse..match.reference.lastVerse) {
+        val rowEnd = text.indexOf('\n', rowStart).takeIf { it >= 0 } ?: text.length
+        val number = Regex("^(\\d{1,3})\\s+").find(text.substring(rowStart, rowEnd)) ?: break
+        if (number.groupValues[1].toIntOrNull() != verse) break
+        end = rowEnd
+        if (rowEnd == text.length) break
+        rowStart = rowEnd + 1
+    }
+    return end
+}
+
 /** A tap opens a verse; long press still selects editable text, and ink tools never trigger links. */
 @Composable
 fun BibleLinkedTextField(
@@ -44,15 +63,18 @@ fun BibleLinkedTextField(
         value = NoteLinks(fieldValue.text, matches)
     }
     val matches = if (links.source == fieldValue.text) links.matches else emptyList()
+    val quoteEnds = remember(matches, fieldValue.text) { matches.associateWith { passageEnd(fieldValue.text, it) } }
     val open by rememberUpdatedState(onReference)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
     val color = MaterialTheme.colorScheme.primary
-    val transformation = remember(matches, color) {
+    val transformation = remember(matches, quoteEnds, color) {
         object : VisualTransformation {
             override fun filter(text: AnnotatedString): TransformedText {
                 val builder = AnnotatedString.Builder(text)
                 matches.filter { it.end <= text.length }.forEach {
+                    val quoteEnd = quoteEnds[it] ?: it.end
+                    if (quoteEnd > it.end && quoteEnd <= text.length) builder.addStyle(SpanStyle(background = color.copy(alpha = .04f)), it.start, quoteEnd)
                     builder.addStyle(SpanStyle(color = color, textDecoration = TextDecoration.Underline,
                         background = color.copy(alpha = .08f)), it.start, it.end)
                 }
@@ -69,12 +91,13 @@ fun BibleLinkedTextField(
                     CustomAccessibilityAction("Ver ${match.reference.label}") { open(match.reference); true }
                 }
             }
-            .pointerInput(fieldValue.text, matches, linksEnabled) {
+            .pointerInput(fieldValue.text, matches, quoteEnds, linksEnabled) {
                 if (!linksEnabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     val offset = layout?.getOffsetForPosition(down.position)
                     val match = matches.firstOrNull { offset != null && offset >= it.start && offset < it.end }
+                        ?: matches.firstOrNull { offset != null && offset >= it.start && offset < (quoteEnds[it] ?: it.end) }
                     if (match != null) {
                         // TextField consumes its press for focus. Observe the physical gesture at Initial
                         // without treating that focus consumption as a cancelled tap.
