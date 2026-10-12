@@ -263,6 +263,8 @@ fun HomeScreen(
             }
         }
 
+        var notesLibraryExpanded by rememberSaveable { mutableStateOf(true) }
+        val openNotes: () -> Unit = { notesOpen=true;notesLibraryExpanded=!notesLibraryExpanded || notes.note==null;closeMenu() }
         val newSpeech: () -> Unit = { notesOpen = false; home.createSpeech(); closeMenu() }
         SidebarLayout(
             expanded = menuExpanded && !(notesOpen && notes.fullScreen),
@@ -276,7 +278,7 @@ fun HomeScreen(
                     onSettings = { closeMenu(); onOpenSettings() },
                     onClose = closeMenu,
                     importActions = drawerImportActions,
-                    onNotes = { notesOpen = true; closeMenu() },
+                    onNotes = openNotes,
                     notesSelected = notesOpen,
                 )
             },
@@ -284,13 +286,13 @@ fun HomeScreen(
                 LibraryRail(
                     filter = filter, counts = counts, onNewSpeech = newSpeech,
                     onFilter = navigate, onSettings = onOpenSettings,
-                    onMenu = openMenu, onNotes = { notesOpen = true }, notesSelected = notesOpen,
+                    onMenu = openMenu, onNotes = openNotes, notesSelected = notesOpen,
                     modifier = Modifier.fillMaxSize(),
                 )
             },
         ) { contentModifier ->
             if (notesOpen) {
-                NotesScreen(notes, openMenu, contentModifier, allowBack = !menuExpanded)
+                NotesScreen(notes, openMenu, contentModifier, allowBack = !menuExpanded, libraryExpanded=notesLibraryExpanded, onLibraryExpanded={notesLibraryExpanded=it})
             } else {
                 Row(contentModifier) {
                     if (twoPane) {

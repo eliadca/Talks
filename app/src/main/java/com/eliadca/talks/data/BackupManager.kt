@@ -74,6 +74,7 @@ private data class BackupFile(
     val versions: List<BackupVersion> = emptyList(),
     val sessions: List<BackupSession> = emptyList(),
     val notes: List<BackupNote> = emptyList(),
+    val templates: List<com.eliadca.talks.core.ink.NotePageTemplate> = emptyList(),
 )
 
 class BackupSummary(val speeches: Int, val folders: Int, val skipped: Int = 0, val notes: Int = 0)
@@ -82,6 +83,7 @@ class BackupSummary(val speeches: Int, val folders: Int, val skipped: Int = 0, v
 class BackupManager(
     private val db: TalksDatabase,
     private val resolver: ContentResolver,
+    private val templatesFile: java.io.File? = null,
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -92,6 +94,7 @@ class BackupManager(
         val folders = db.folders().all()
         val speeches = db.speeches().all()
         val file = BackupFile(
+            templates=templatesFile?.takeIf {it.exists()}?.let {json.decodeFromString<List<com.eliadca.talks.core.ink.NotePageTemplate>>(it.readText())}.orEmpty(),
             exportedAt = System.currentTimeMillis(),
             folders = folders.map { BackupFolder(it.id, it.name, it.color, it.createdAt) },
             speeches = speeches.map {
@@ -124,6 +127,13 @@ class BackupManager(
         }
         if (file.app != "Talks") throw IllegalStateException("El archivo no es una copia de seguridad de Talks.")
 
+        if(file.templates.isNotEmpty() && templatesFile!=null) {
+            val existing=templatesFile.takeIf {it.exists()}?.let {json.decodeFromString<List<com.eliadca.talks.core.ink.NotePageTemplate>>(it.readText())}.orEmpty()
+            val merged=(existing+file.templates).distinctBy {it.id}
+            val staging=java.io.File(templatesFile.parentFile,"notes-templates.json.part")
+            staging.writeText(json.encodeToString(kotlinx.serialization.builtins.ListSerializer(com.eliadca.talks.core.ink.NotePageTemplate.serializer()),merged))
+            check(staging.renameTo(templatesFile)) {"No se pudieron restaurar las plantillas."}
+        }
         db.withTransaction {
             val existingFolders = db.folders().all()
             val folderMap = HashMap<Long, Long>()

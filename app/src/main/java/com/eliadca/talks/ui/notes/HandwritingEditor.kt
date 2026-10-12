@@ -2,6 +2,7 @@ package com.eliadca.talks.ui.notes
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -68,17 +69,28 @@ class NoteEditorState {
     var textBoxEditor by mutableStateOf(false)
     var textSettings by mutableStateOf(false)
     var zoom by mutableFloatStateOf(1f)
+    var toolbarSide by mutableStateOf(false)
+    var objects by mutableStateOf(false)
+    var transform by mutableStateOf(false)
+    var shape by mutableStateOf(com.eliadca.talks.core.ink.NoteShape.LINE)
+    var shapes by mutableStateOf(false)
+    var grid by mutableStateOf(false)
+    var templates by mutableStateOf(false)
+    var imageOptions by mutableStateOf(false)
+    var appearance by mutableStateOf(false)
     var activeBox by mutableStateOf<Long?>(null)
     var boxSelection by mutableStateOf(TextRange(0))
     var selected by mutableStateOf(emptySet<Long>())
     companion object {
         val Saver = androidx.compose.runtime.saveable.listSaver<NoteEditorState, Any>(
             save = { state -> listOf(state.tool.name, state.pen.name, state.pressure, state.stylusOnly, state.zoom) +
-                PenKind.entries.flatMap { listOf(state.presets.getValue(it).first, state.presets.getValue(it).second) } + listOf(state.eraserMode.name,state.eraserRadius) },
+                PenKind.entries.flatMap { listOf(state.presets.getValue(it).first, state.presets.getValue(it).second) } + listOf(state.eraserMode.name,state.eraserRadius,state.toolbarSide,state.shape.name) },
             restore = { list -> NoteEditorState().apply {
                 tool = InkTool.valueOf(list[0] as String); pen = PenKind.valueOf(list[1] as String)
                 pressure = list[2] as Boolean; stylusOnly = list[3] as Boolean; zoom = list[4] as Float
                 PenKind.entries.forEachIndexed { i, kind -> presets[kind] = (list[5 + i * 2] as Int) to (list[6 + i * 2] as Float) }
+                if(list.size>=17)shape=com.eliadca.talks.core.ink.NoteShape.valueOf(list[16] as String)
+                if(list.size>=16)toolbarSide=list[15] as Boolean
                 if(list.size>=15) {eraserMode=EraserMode.valueOf(list[13] as String);eraserRadius=list[14] as Float}
             } })
     }
@@ -91,12 +103,17 @@ fun rememberNoteEditorState(): NoteEditorState {
     val state = rememberSaveable(saver = NoteEditorState.Saver) { NoteEditorState().apply {
         PenKind.entries.forEach { kind -> presets[kind] = prefs.getInt("${kind.name}-color", presets.getValue(kind).first) to prefs.getFloat("${kind.name}-width", presets.getValue(kind).second) }
         pen = runCatching { PenKind.valueOf(prefs.getString("kind", PenKind.BALLPOINT.name)!!) }.getOrDefault(PenKind.BALLPOINT)
+        tool=runCatching {InkTool.valueOf(prefs.getString("tool","TEXT")!!)}.getOrDefault(InkTool.TEXT)
+        shape=runCatching {com.eliadca.talks.core.ink.NoteShape.valueOf(prefs.getString("shape","LINE")!!)}.getOrDefault(com.eliadca.talks.core.ink.NoteShape.LINE)
+        zoom = prefs.getFloat("zoom",1f).coerceIn(.5f,3f)
+        toolbarSide=prefs.getBoolean("toolbar-side",false)
         pressure = prefs.getBoolean("pressure", true); stylusOnly = prefs.getBoolean("stylus", false)
         eraserRadius=prefs.getFloat("eraser-radius",20f).coerceIn(6f,65f);eraserMode=runCatching {EraserMode.valueOf(prefs.getString("eraser-mode",EraserMode.PARTIAL.name)!!)}.getOrDefault(EraserMode.PARTIAL)
     } }
     val presets = state.presets.toMap()
-    LaunchedEffect(presets, state.pen, state.pressure, state.stylusOnly, state.eraserRadius, state.eraserMode) {
+    LaunchedEffect(presets, state.pen, state.pressure, state.stylusOnly, state.eraserRadius, state.eraserMode, state.zoom, state.toolbarSide,state.tool,state.shape) {
         prefs.edit().apply {
+            putString("tool",state.tool.name);putString("shape",state.shape.name);putFloat("zoom",state.zoom);putBoolean("toolbar-side",state.toolbarSide)
             presets.forEach { (kind, value) -> putInt("${kind.name}-color", value.first); putFloat("${kind.name}-width", value.second) }
             putFloat("eraser-radius",state.eraserRadius);putString("eraser-mode",state.eraserMode.name);putString("kind", state.pen.name); putBoolean("pressure", state.pressure); putBoolean("stylus", state.stylusOnly)
         }.apply()
@@ -138,17 +155,20 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
-    LaunchedEffect(ink.strokes, ink.textBoxes, body.text) { state.selected = state.selected.intersect((ink.strokes.map { it.id } + ink.textBoxes.map { it.id } + if (body.text.isNotEmpty()) listOf(InkDocument.MAIN_TEXT_ID) else emptyList()).toSet()) }
+    LaunchedEffect(ink.strokes, ink.textBoxes,ink.images,ink.lockedIds,ink.hiddenIds, body.text) { state.selected = (state.selected-ink.lockedIds-ink.hiddenIds).intersect((ink.strokes.map { it.id } + ink.textBoxes.map { it.id } + ink.images.map {it.id} + if (body.text.isNotEmpty()) listOf(InkDocument.MAIN_TEXT_ID) else emptyList()).toSet()) }
     val active=ink.textBoxes.firstOrNull {it.id==state.activeBox}
     val effectiveStyle=active?.formatting?.styleAt(state.boxSelection.min) ?: textStyle
     fun format(transform: (com.eliadca.talks.core.notes.NoteTextStyle)->com.eliadca.talks.core.notes.NoteTextStyle) {
+        if((active?.id ?: InkDocument.MAIN_TEXT_ID) in ink.lockedIds)return
         if(active==null)onFormat(transform)
         else onInkChange(ink.copy(textBoxes=ink.textBoxes.map {if(it.id==active.id)it.copy(formatting=it.formatting.apply(if(state.boxSelection.collapsed)0 else state.boxSelection.min,if(state.boxSelection.collapsed)it.text.length else state.boxSelection.max,transform)) else it}))
     }
     fun align(value: Int) {
+        if((active?.id ?: InkDocument.MAIN_TEXT_ID) in ink.lockedIds)return
         if(active==null)onAlign(value) else onInkChange(ink.copy(textBoxes=ink.textBoxes.map {if(it.id==active.id)it.copy(formatting=it.formatting.align(it.text,state.boxSelection.min,state.boxSelection.max,value)) else it}))
     }
     fun list(checklist: Boolean) {
+        if((active?.id ?: InkDocument.MAIN_TEXT_ID) in ink.lockedIds)return
         if(active==null) {onList(checklist);return}
         val start=active.text.lastIndexOf('\n',(state.boxSelection.min-1).coerceAtLeast(-1))+1
         val end=active.text.indexOf('\n',state.boxSelection.max).takeIf {it>=0} ?: active.text.length
@@ -160,7 +180,7 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
     fun choose(tool: InkTool) { state.tool = tool; state.selected = emptySet(); if (tool != InkTool.TEXT) keyboard?.hide() }
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
         Column {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolRow(state.toolbarSide) {
                 IconToggleButton(state.tool == InkTool.TEXT, { choose(InkTool.TEXT) }) { Icon(Icons.Filled.Keyboard, "Modo teclado") }
                 IconToggleButton(state.tool != InkTool.TEXT, { choose(InkTool.PEN) }) { Icon(Icons.Filled.Edit, "Modo lápiz") }
                 VerticalDivider(Modifier.height(24.dp).padding(horizontal = 6.dp))
@@ -171,12 +191,18 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
                     Icon(Icons.AutoMirrored.Filled.Redo, if (text) "Rehacer texto" else "Rehacer escritura") }
                 IconButton(onClick = { state.tool = InkTool.SELECT; state.selected = if (body.text.isNotEmpty()) setOf(InkDocument.MAIN_TEXT_ID) else emptySet(); keyboard?.hide() }) { Icon(Icons.Filled.OpenWith, "Mover y ajustar texto") }
                 IconButton(onClick = { state.textBoxEditor = true }) { Icon(Icons.Filled.TextFields, "Añadir cuadro de texto móvil") }
+                IconButton(onClick = { state.toolbarSide = !state.toolbarSide }) { Icon(Icons.Filled.ViewSidebar, "Ubicar herramientas arriba o a la izquierda") }
+                IconButton(onClick = { state.templates = true }) { Icon(Icons.Filled.AutoAwesomeMosaic,"Plantillas de hojas") }
+                NoteImageButton(state,ink,onInkChange)
+                IconButton(onClick = { state.shapes = true }) { Icon(Icons.Filled.Category, "Formas y líneas") }
+                IconButton(onClick = { state.grid = true }) { Icon(Icons.Filled.GridOn, "Cuadrícula y ajuste magnético") }
+                IconButton(onClick = { state.objects = true }) { Icon(Icons.Filled.Layers, "Objetos de la nota") }
                 IconButton(onClick = { state.rules = true }) { Icon(Icons.Filled.FormatLineSpacing, "Renglones") }
                 IconButton(onClick = { state.pageSettings = true }) { Icon(Icons.Filled.AspectRatio, "Tamaño de hoja y zoom") }
                 IconButton(onClick = { Clipboard.copy(context, "Nota", (listOf(body.text) + ink.textBoxes.sortedBy { it.y }.map { it.text }).filter { it.isNotBlank() }.joinToString("\n\n")) }, enabled = body.text.isNotBlank() || ink.textBoxes.isNotEmpty()) {
                     Icon(Icons.Filled.ContentCopy, "Copiar nota completa") }
             }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolRow(state.toolbarSide) {
                 if (state.tool == InkTool.TEXT) {
                     IconToggleButton(effectiveStyle.bold, { format { it.copy(bold = !effectiveStyle.bold) } }) { Icon(Icons.Filled.FormatBold, "Negrita") }
                     IconToggleButton(effectiveStyle.italic, { format { it.copy(italic = !effectiveStyle.italic) } }) { Icon(Icons.Filled.FormatItalic, "Cursiva") }
@@ -190,9 +216,7 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
                     IconButton(onClick = { list(true) }) { Icon(Icons.Filled.Checklist, "Lista de tareas") }
                 } else {
                     PenKind.entries.forEach { kind ->
-                        IconToggleButton(state.pen == kind && state.tool == InkTool.PEN, {
-                            state.pen = kind; choose(InkTool.PEN); state.settings = true
-                        }) { Icon(when (kind) {
+                        Box(Modifier.size(48.dp).combinedClickable(onClick = { state.pen=kind; choose(InkTool.PEN) }, onLongClick = { state.pen=kind; choose(InkTool.PEN);state.settings=true }).semantics { contentDescription=kind.label }, contentAlignment=Alignment.Center) { Icon(when (kind) {
                             PenKind.BALLPOINT -> Icons.Filled.Edit; PenKind.PENCIL -> Icons.Filled.Create
                             PenKind.FOUNTAIN -> Icons.Filled.Draw; PenKind.HIGHLIGHTER -> Icons.Filled.BorderColor
                         }, kind.label, tint = if (state.pen == kind) Color(state.color) else MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -205,20 +229,25 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
                             .clickable { state.color = color; state.tool = InkTool.PEN }
                             .semantics { contentDescription = "Color rápido #%06X".format(color and 0xffffff) })
                     }
-                    IconToggleButton(state.tool == InkTool.ERASER, { choose(InkTool.ERASER); state.eraserSettings = true }) { Icon(Icons.Filled.Backspace, "Goma de borrar") }
+                    Box(Modifier.size(48.dp).combinedClickable(onClick={choose(InkTool.ERASER)},onLongClick={choose(InkTool.ERASER);state.eraserSettings=true}).semantics {contentDescription="Goma de borrar"},contentAlignment=Alignment.Center) {Icon(Icons.Filled.Backspace,null,tint=if(state.tool==InkTool.ERASER)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)}
+                    IconToggleButton(state.tool == InkTool.LASSO, {choose(InkTool.LASSO)}) {Icon(Icons.Filled.Gesture,"Selección con lazo libre")}
                     IconToggleButton(state.tool == InkTool.SELECT, { choose(InkTool.SELECT) }) { Icon(Icons.Filled.CropFree, "Seleccionar texto y trazos") }
                     IconToggleButton(state.tool == InkTool.MOVE, { choose(InkTool.MOVE) }) { Icon(Icons.Filled.PanTool, "Mover la página") }
                     IconButton(onClick = { state.settings = true }) { Icon(Icons.Filled.Tune, "Tipo, grosor y color del lápiz") }
                 }
             }
-            if (state.tool == InkTool.SELECT) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (state.tool in listOf(InkTool.SELECT,InkTool.NODES,InkTool.LASSO)) {
+                ToolRow(state.toolbarSide) {
                     Text(if (state.selected.isEmpty()) "Rodea texto o trazos. Arrastra para mover; usa el punto para ajustar su tamaño." else "${state.selected.size} elementos seleccionados",
                         style = MaterialTheme.typography.labelSmall)
                     if (state.selected.isNotEmpty()) {
+                        if(ink.images.any {it.id in state.selected})IconButton(onClick={state.imageOptions=true}) {Icon(Icons.Filled.Crop,"Recortar y editar imagen")}
+                        IconButton(onClick={state.tool=InkTool.NODES},enabled=state.selected.size==1 && ink.strokes.any {it.id in state.selected}) {Icon(Icons.Filled.EditLocationAlt,"Editar puntos del trazo")}
+                        IconButton(onClick={state.appearance=true}) {Icon(Icons.Filled.Palette,"Relleno, degradado y apariencia")}
+                        IconButton(onClick={state.transform=true}) {Icon(Icons.Filled.Transform,"Transformación precisa y estilo")}
                         if (state.selected.size == 1 && ink.textBoxes.any { it.id in state.selected }) IconButton(onClick = { state.textBoxEditor = true }) { Icon(Icons.Filled.Edit, "Editar cuadro de texto") }
                         if (InkDocument.MAIN_TEXT_ID !in state.selected) IconButton(onClick = { onInkChange(ink.duplicateSelection(state.selected)) }) { Icon(Icons.Filled.ContentCopy, "Duplicar trazos") }
-                        if (InkDocument.MAIN_TEXT_ID !in state.selected) IconButton(onClick = { onInkChange(ink.copy(strokes = ink.strokes.filterNot { it.id in state.selected }, textBoxes = ink.textBoxes.filterNot { it.id in state.selected })); state.selected = emptySet() }) {
+                        if (InkDocument.MAIN_TEXT_ID !in state.selected) IconButton(onClick = { onInkChange(ink.removeSelection(state.selected)); state.selected = emptySet() }) {
                             Icon(Icons.Filled.DeleteOutline, "Eliminar trazos seleccionados") }
                         IconButton(onClick = { state.selected = emptySet() }) { Icon(Icons.Filled.Deselect, "Quitar selección") }
                     }
@@ -226,6 +255,9 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
             } else if (state.tool == InkTool.RULE_AREA) Text("Arrastra una zona para añadir renglones.", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
         }
     }
+    NoteMediaTools(state,ink,onInkChange)
+    NoteVectorAppearance(state,ink,onInkChange)
+    AdvancedNoteTools(state,ink.copy(bodyFrame=ink.bodyFrame ?: if(body.text.isNotEmpty())NoteTextFrame(width=ink.pageWidth-80f) else null),onInkChange)
     if (state.eraserSettings) AlertDialog(onDismissRequest = { state.eraserSettings = false }, title = { Text("Goma de borrar") }, text = {
         Column {
             Text("Tamaño: ${(state.eraserRadius * 2).toInt()}")
@@ -256,18 +288,21 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
     if (state.pageSettings) {
         var width by remember { mutableFloatStateOf(ink.pageWidth) }
         var height by remember { mutableFloatStateOf(ink.height.coerceAtMost(20000f)) }
+        var paper by remember {mutableIntStateOf(ink.paperColor)}
         AlertDialog(onDismissRequest = { state.pageSettings = false }, title = { Text("Hoja y zoom") }, text = {
             Column {
                 Text("Ancho de la hoja: ${width.toInt()}")
                 Slider(width, { width = it }, valueRange = 600f..2400f, modifier = Modifier.semantics { contentDescription = "Ancho de hoja" })
                 Text("Altura de la hoja: ${height.toInt()}")
                 Slider(height, { height = it }, valueRange = 1000f..20000f, modifier = Modifier.semantics { contentDescription = "Altura de hoja" })
+                Text("Color de papel")
+                Row {listOf(0xffffffff,0xfffff8e1,0xffe8f5e9,0xffe3f2fd,0xfff3e5f5).forEach {value->Box(Modifier.padding(4.dp).size(30.dp).border(if(paper==value.toInt())3.dp else 1.dp,MaterialTheme.colorScheme.outline,CircleShape).background(Color(value),CircleShape).clickable {paper=value.toInt()})}}
                 Text("Zoom: ${(state.zoom * 100).toInt()}%")
                 Slider(state.zoom, { state.zoom = it }, valueRange = .5f..3f, modifier = Modifier.semantics { contentDescription = "Zoom de la hoja" })
                 TextButton(onClick = { state.zoom = (InkDocument.PAGE_WIDTH / ink.pageWidth).coerceIn(.5f, 3f) }) { Text("Ajustar al ancho") }
                 Text("La hoja conserva todos los trazos. Usa Mover para desplazarte por las zonas ampliadas.", style = MaterialTheme.typography.bodySmall)
             }
-        }, confirmButton = { TextButton(onClick = { onInkChange(ink.resizePage(width, height)); state.pageSettings = false }) { Text("Aplicar") } },
+        }, confirmButton = { TextButton(onClick = { onInkChange(ink.resizePage(width, height).copy(paperColor=paper)); state.pageSettings = false }) { Text("Aplicar") } },
             dismissButton = { TextButton(onClick = { state.pageSettings = false }) { Text("Cerrar") } })
     }
     if (state.rules) {
@@ -395,28 +430,34 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
         val frame = ink.bodyFrame ?: NoteTextFrame(width = ink.pageWidth - 80f)
         val displayed = state.preview ?: ink
         val shownFrame = displayed.bodyFrame ?: frame
-        val measured = ink.copy(bodyFrame = if(body.text.isEmpty())null else frame.copy(height = maxOf(100f, textHeight)))
+        val measured = displayed.copy(bodyFrame = if(body.text.isEmpty())null else frame.copy(height = maxOf(100f, textHeight)))
         val worldHeight = max(ink.height, shownFrame.y + textHeight + 300)
         val pageHeight = (worldHeight * factor).dp
+        val scrollPrefs=rememberNoteWorkspacePreferences()
         val vertical = rememberScrollState(); val horizontal = rememberScrollState()
+        LaunchedEffect(vertical,horizontal) {
+            kotlinx.coroutines.delay(150)
+            vertical.scrollTo(scrollPrefs.getInt("scroll-y",0));horizontal.scrollTo(scrollPrefs.getInt("scroll-x",0))
+            snapshotFlow {vertical.value to horizontal.value}.collect {(y,x)->scrollPrefs.edit().putInt("scroll-y",y).putInt("scroll-x",x).apply()}
+        }
         Column(Modifier.fillMaxSize().verticalScroll(vertical).horizontalScroll(horizontal).widthIn(min = maxWidth).testTag("note-page-scroll"), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.padding(12.dp).width(paperWidth).height(pageHeight).background(MaterialTheme.colorScheme.surface)
+            Box(Modifier.padding(12.dp).width(paperWidth).height(pageHeight).background(Color(ink.paperColor))
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                @Composable fun inkLayer() {
-                    AndroidView(factory = { InkPageView(it) }, modifier = Modifier.fillMaxSize().testTag("ink-page"), update = {
-                        it.document = measured; it.drawTextBoxes = false; it.onPreview = { preview -> state.preview = preview }; it.tool = state.tool; it.pen = state.pen; it.penColor = state.color; it.penWidth = state.width
+                val writing = state.tool !in listOf(InkTool.TEXT,InkTool.MOVE)
+                @Composable fun inkLayer(input:Boolean) {
+                    AndroidView(factory = { InkPageView(it) }, modifier = Modifier.fillMaxSize().testTag(if(input || !writing)"ink-page" else "ink-artwork"), update = {
+                        it.document = if(input)ink.copy(bodyFrame=measured.bodyFrame) else measured; it.drawContent = !input; it.drawTextBoxes = false; it.onPreview = { preview -> state.preview = preview }; it.tool = if(input)state.tool else InkTool.MOVE; it.shape = state.shape; it.pen = state.pen; it.penColor = state.color; it.penWidth = state.width
                         it.eraserMode = state.eraserMode; it.eraserRadius = state.eraserRadius; it.usePressure = state.pressure; it.stylusOnly = state.stylusOnly; it.ruleColor = ruleColor
                         it.selection = state.selected; it.onSelectionChange = { selected -> state.selected = selected }
                         it.onChange = onInkChange; it.onAreaFinished = { state.tool = InkTool.PEN }
                     })
                 }
-                val writing = state.tool !in listOf(InkTool.TEXT, InkTool.MOVE)
-                if (!writing) inkLayer()
-                BibleLinkedTextField(body, onEdit, readOnly = state.tool != InkTool.TEXT, linksEnabled = !writing, onReference = onReference,
+                inkLayer(false)
+                if(InkDocument.MAIN_TEXT_ID !in ink.hiddenIds) BibleLinkedTextField(body, onEdit, readOnly = state.tool != InkTool.TEXT || InkDocument.MAIN_TEXT_ID in ink.lockedIds, linksEnabled = !writing, onReference = onReference,
                     onReferenceAt = onReferenceAt, onAnchorChanged = onAnchorChanged, formatting = ink.formatting, textScale = factor * shownFrame.scale,
                     modifier = Modifier.offset((shownFrame.x * factor).dp, (shownFrame.y * factor).dp).width((shownFrame.width * factor).dp).onFocusChanged {if(it.isFocused)state.activeBox=null}.testTag("note-body"),
                     textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = (46 * factor * shownFrame.scale).sp,
-                        lineHeight = (64 * factor * shownFrame.scale).sp, color = MaterialTheme.colorScheme.onSurface),
+                        lineHeight = (64 * factor * shownFrame.scale).sp, color = Color(0xff232b3c)),
                     onTextLayout = { result -> textHeight = result.multiParagraph.height / density.density / factor },
                     decorationBox = { field -> Box {
                         if (body.text.isEmpty() && ink.strokes.isEmpty() && state.tool == InkTool.TEXT) Text(
@@ -424,7 +465,7 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         field()
                     } })
-                displayed.textBoxes.forEach { box ->
+                displayed.textBoxes.filterNot {it.id in ink.hiddenIds}.forEach { box ->
                     key(box.id) {
                         var value by remember { mutableStateOf(TextFieldValue(box.text)) }
                         LaunchedEffect(box.text) { if (value.text != box.text) value = TextFieldValue(box.text) }
@@ -433,7 +474,7 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
                             if (next.text != box.text) onInkChange(ink.copy(textBoxes = ink.textBoxes.map {
                                 if (it.id == box.id) it.copy(text = next.text, formatting = it.formatting.replace(it.text, next.text),height=maxOf(it.height,next.text.lines().sumOf {row->maxOf(1,(row.length*it.size*.6f/it.width).toInt()+1)}*it.size*1.4f)) else it
                             }))
-                        }, readOnly = state.tool != InkTool.TEXT, linksEnabled = !writing, onReference = onReference,
+                        }, readOnly = state.tool != InkTool.TEXT || box.id in ink.lockedIds, linksEnabled = !writing, onReference = onReference,
                             onReferenceAt = onReferenceAt, onAnchorChanged = onAnchorChanged, formatting = box.formatting,
                             textScale = factor * box.size / 46f,
                             modifier = Modifier.offset((box.x * factor).dp, (box.y * factor).dp).width((box.width * factor).dp).onFocusChanged {if(it.isFocused) {state.activeBox=box.id;state.boxSelection=value.selection}}.testTag("text-box-${box.id}"),
@@ -441,7 +482,7 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
                                 lineHeight = (box.size * factor * 1.4f).sp, color = Color(box.color)), onTextLayout = {})
                     }
                 }
-                if (writing) inkLayer()
+                if (writing) inkLayer(true)
             }
             OutlinedButton(onClick = { onInkChange(ink.copy(height = worldHeight + 1000)) }, modifier = Modifier.padding(vertical = 8.dp)) {
                 Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Añadir espacio a la página")

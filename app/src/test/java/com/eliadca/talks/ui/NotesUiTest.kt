@@ -27,6 +27,7 @@ import com.eliadca.talks.ui.notes.NotesWorkspace
 import com.eliadca.talks.ui.notes.TranscriptEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,8 +43,76 @@ import androidx.test.runner.lifecycle.Stage
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(ExperimentalTestApi::class)
 class NotesUiTest {
+    @Before fun resetWorkspacePreferences() {
+        val context=androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
+        context.getSharedPreferences("notes-workspace",android.content.Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences("notes-pencil",android.content.Context.MODE_PRIVATE).edit().clear().commit()
+    }
     @get:Rule val compose = createComposeRule()
     private val entries = listOf(TranscriptEntry(1, "La primera idea importante."), TranscriptEntry(2, "Otra idea que merece una nota."))
+
+    @Test fun penAndEraserSelectWithATapAndConfigureOnlyOnLongPress() {
+        compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Una idea"),{},InkDocument(),{},false,false,{},{},Modifier.fillMaxSize())}}
+        compose.onNodeWithContentDescription("Modo lápiz").performClick()
+        compose.onNodeWithContentDescription("Goma de borrar").performClick()
+        compose.onNodeWithText("Tamaño:",substring=true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Goma de borrar").performTouchInput {longClick()}
+        compose.onNodeWithText("Borrar solo lo que toco").assertIsDisplayed()
+        compose.onNodeWithText("Listo").performClick()
+        compose.onNodeWithContentDescription("Lápiz").performClick()
+        compose.onNodeWithText("Grosor:",substring=true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Lápiz").performTouchInput {longClick()}
+        compose.onNodeWithText("Grosor:",substring=true).assertExists()
+    }
+
+    @Test fun workspacePlacementAndZoomSurviveClosingAndReopeningTheEditor() {
+        val context=androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
+        context.getSharedPreferences("notes-pencil",0).edit().putFloat("zoom",1.4f).putBoolean("toolbar-side",true).commit()
+        context.getSharedPreferences("notes-workspace",0).edit().putBoolean("panel-open",true).putString("dock","BOTTOM").commit()
+        var generation by mutableIntStateOf(0)
+        compose.setContent {key(generation) {MaterialTheme {NotesWorkspace(entries,"",TextFieldValue("Una idea"),false,true,{},{},{},Modifier.fillMaxSize())}}}
+        val page=compose.onNodeWithTag("note-page-scroll").fetchSemanticsNode().boundsInRoot
+        val panel=compose.onNodeWithTag("voice-panel").fetchSemanticsNode().boundsInRoot
+        assertTrue(page.left>=112f);assertTrue(panel.top>=page.bottom)
+        compose.runOnIdle {generation++}
+        compose.onNodeWithTag("voice-panel").assertExists()
+        compose.onNodeWithContentDescription("Tamaño de hoja y zoom").performScrollTo().performClick()
+        compose.onNodeWithText("Zoom: 140%").assertIsDisplayed()
+        compose.onNodeWithText("Aplicar").performClick()
+        screenshot("notes-advanced-side-tools")
+    }
+
+    @Test fun vectorShapesAndPageTemplatesAreUsableFromTheToolbar() {
+        var ink by mutableStateOf(InkDocument())
+        compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Una idea"),{},ink,{ink=it},false,false,{},{},Modifier.fillMaxSize())}}
+        compose.onNodeWithContentDescription("Formas y líneas").performScrollTo().performClick()
+        compose.onNodeWithText("Rectángulo").performClick()
+        compose.onNodeWithTag("ink-page").performTouchInput {swipe(Offset(80f,120f),Offset(250f,280f),200)}
+        compose.runOnIdle {assertEquals(1,ink.strokes.size);assertTrue(ink.strokes.single().geometric)}
+        compose.onNodeWithContentDescription("Plantillas de hojas").performScrollTo().performClick()
+        compose.onNodeWithText("Puntos").performClick()
+        compose.runOnIdle {assertTrue(ink.dotted);assertEquals(1,ink.strokes.size)}
+        screenshot("notes-vector-shape-template")
+    }
+
+    @Test fun imagesTemplatesAndGradientVectorsShareAFullTabletWorkspace() {
+        val context=androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
+        context.getSharedPreferences("notes-pencil",0).edit().putBoolean("toolbar-side",true).commit()
+        context.getSharedPreferences("notes-workspace",0).edit().putBoolean("panel-open",true).commit()
+        val photo=Bitmap.createBitmap(240,140,Bitmap.Config.ARGB_8888);val canvas=Canvas(photo)
+        canvas.drawColor(android.graphics.Color.rgb(186,223,246))
+        val paint=android.graphics.Paint().apply {color=android.graphics.Color.rgb(64,117,95)}
+        val mountain=android.graphics.Path().apply {moveTo(0f,140f);lineTo(85f,35f);lineTo(140f,100f);lineTo(200f,50f);lineTo(240f,140f);close()};canvas.drawPath(mountain,paint)
+        val bytes=java.io.ByteArrayOutputStream().apply {photo.compress(Bitmap.CompressFormat.PNG,100,this)}.toByteArray();photo.recycle()
+        var ink by mutableStateOf(InkDocument(dotted=true,
+            images=listOf(com.eliadca.talks.core.ink.NoteImage(1,android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP),x=80f,y=230f,width=420f,height=245f)),
+            strokes=listOf(com.eliadca.talks.core.ink.InkStroke(2,com.eliadca.talks.core.ink.PenKind.BALLPOINT,0xff1565c0.toInt(),4f,
+                com.eliadca.talks.core.ink.shapePoints(com.eliadca.talks.core.ink.NoteShape.RECTANGLE,com.eliadca.talks.core.ink.InkPoint(80f,540f),com.eliadca.talks.core.ink.InkPoint(730f,790f)),geometric=true,fillColor=0xffb2dfdb.toInt(),gradientColor=0xffbbdefb.toInt())),
+            textBoxes=listOf(com.eliadca.talks.core.ink.NoteTextBox(3,"Ideas importantes\n• Organizar los objetivos\n• Diseñar con claridad",120f,580f,width=550f,size=34f)),nextId=4))
+        compose.setContent {MaterialTheme {NotesWorkspace(entries,"",TextFieldValue("Proyecto de estudio\nImágenes, formas y notas en una misma hoja."),false,true,{},{},{},Modifier.fillMaxSize(),ink=ink,onInkChange={ink=it})}}
+        compose.onNodeWithTag("voice-panel").assertExists();compose.onNodeWithTag("text-box-3").assertExists()
+        screenshot("notes-high-end-workspace")
+    }
 
     private fun screenshot(name: String) {
         val dir = System.getenv("TALKS_SCREENSHOT_DIR") ?: return

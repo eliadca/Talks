@@ -264,6 +264,12 @@ class NotesViewModel(private val app: Application, repository: com.eliadca.talks
         append(transcriptText)
         if (partial.isNotBlank()) { if (isNotEmpty()) append(" "); append(partial.trim()) }
     }
+    fun exportArtwork(uri:Uri,document:InkDocument,text:String,format:String) {
+        viewModelScope.launch {
+            try {withContext(Dispatchers.IO) {app.contentResolver.openOutputStream(uri)?.use {out->NoteArtworkExport.write(app,document,text,format,out)} ?: error("No se pudo abrir el archivo.")}}
+            catch(e:Exception) {report(e)}
+        }
+    }
     fun exportTranscript(uri: Uri, text: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {

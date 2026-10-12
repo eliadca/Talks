@@ -80,12 +80,17 @@ import com.eliadca.talks.speech.EngineState
 import kotlinx.coroutines.launch
 
 @Composable
-fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Modifier, allowBack: Boolean = true) {
+fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Modifier, allowBack: Boolean = true, libraryExpanded: Boolean = true, onLibraryExpanded: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val notes by vm.items.collectAsState()
     val saveError by vm.saveError.collectAsState()
     var citationAnchor by remember { mutableStateOf<Rect?>(null) }
+    var exportMenu by remember {mutableStateOf(false)}
+    var artwork by remember {mutableStateOf<Triple<InkDocument,String,String>?>(null)}
+    val svgExport=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/svg+xml")) {uri->artwork?.let {if(uri!=null)vm.exportArtwork(uri,it.first,it.second,it.third)};artwork=null}
+    val pdfExport=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {uri->artwork?.let {if(uri!=null)vm.exportArtwork(uri,it.first,it.second,it.third)};artwork=null}
+    val pngExport=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {uri->artwork?.let {if(uri!=null)vm.exportArtwork(uri,it.first,it.second,it.third)};artwork=null}
     var exportText by remember { mutableStateOf("") }
     val aiInstalled by vm.ai.installed.collectAsState()
     var voiceOptions by remember { mutableStateOf(false) }
@@ -129,7 +134,7 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
         val wide = maxWidth >= 760.dp
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = if (vm.note == null) onMenu else vm::backToList) {
+                IconButton(onClick = if (vm.note == null) onMenu else ({ vm.backToList();onLibraryExpanded(true) })) {
                     Icon(if (vm.note == null) Icons.Filled.Menu else Icons.AutoMirrored.Filled.ArrowBack,
                         if (vm.note == null) "Abrir el menú" else "Volver a notas")
                 }
@@ -144,6 +149,14 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
                 }
                 if (vm.note != null) IconButton(onClick = { vm.fullScreen = !vm.fullScreen }) {
                     Icon(if (vm.fullScreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, if (vm.fullScreen) "Salir de pantalla completa" else "Pantalla completa de notas")
+                }
+                if(vm.note!=null) Box {
+                    IconButton(onClick={exportMenu=true}) {Icon(Icons.Filled.FileDownload,"Exportar nota")}
+                    DropdownMenu(exportMenu,{exportMenu=false}) {
+                        DropdownMenuItem(text={Text("Guardar nota en SVG vectorial")},onClick={artwork=Triple(vm.ink,vm.body.text,"svg");exportMenu=false;svgExport.launch(vm.note!!.title.ifBlank {"Nota"}+".svg")})
+                        DropdownMenuItem(text={Text("Guardar nota en PDF")},onClick={artwork=Triple(vm.ink,vm.body.text,"pdf");exportMenu=false;pdfExport.launch(vm.note!!.title.ifBlank {"Nota"}.replace(Regex("[\\/:*?\"<>|]"),"_")+".pdf")})
+                        DropdownMenuItem(text={Text("Guardar nota como imagen PNG")},onClick={artwork=Triple(vm.ink,vm.body.text,"png");exportMenu=false;pngExport.launch(vm.note!!.title.ifBlank {"Nota"}.replace(Regex("[\\/:*?\"<>|]"),"_")+".png")})
+                    }
                 }
                 IconButton(onClick = { bibleOptions = true }) { Icon(Icons.Filled.MenuBook, "Biblia de Estudio") }
                 if (vm.note == null) {
@@ -165,9 +178,19 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
             if (saveError != null) Text(saveError.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp))
             if (vm.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             HorizontalDivider()
-            if (vm.note == null) {
-                NoteLibrary(notes, vm::open, { delete = it }, Modifier.weight(1f))
-            } else {
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+              if((libraryExpanded || vm.note==null) && !vm.fullScreen && (wide || vm.note==null)) {
+                Column(if(wide)Modifier.width(300.dp).fillMaxHeight() else Modifier.fillMaxSize()) {
+                  Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Text("Notas",Modifier.weight(1f).padding(start=16.dp),style=MaterialTheme.typography.titleMedium)
+                    IconButton(onClick=vm::create,enabled=!vm.loading) {Icon(Icons.Filled.Add,"Nueva nota")}
+                    if(vm.note!=null)IconButton(onClick={onLibraryExpanded(false)}) {Icon(Icons.Filled.ChevronLeft,"Contraer lista de notas")}
+                  }
+                  NoteLibrary(notes,{vm.open(it);onLibraryExpanded(false)},{delete=it},Modifier.weight(1f))
+                }
+                if(wide)VerticalDivider()
+              }
+              if(vm.note!=null && (wide || !libraryExpanded)) {
                 key(vm.note!!.id) {
                     NotesWorkspace(entries = vm.entries, partial = vm.partial, body = vm.body,
                         automatic = vm.note!!.automatic, wide = wide, onEdit = vm::edit, onAdd = vm::addEntries, onInsert = vm::insert,
@@ -199,6 +222,7 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
                         modifier = Modifier.weight(1f))
                 }
             }
+        }
         }
         vm.passage?.let { passage ->
             CitationThought(passage, if (vm.passageIsFromVoice) null else citationAnchor, vm.passageExpanded, vm::expandPassage, vm::dismissPassage, vm::addPassage)
@@ -242,7 +266,7 @@ fun NotesScreen(vm: NotesViewModel, onMenu: () -> Unit, modifier: Modifier = Mod
 }
 
 @Composable
-private fun NoteLibrary(notes: List<NoteListItem>, onOpen: (Long) -> Unit, onDelete: (NoteListItem) -> Unit, modifier: Modifier) {
+internal fun NoteLibrary(notes: List<NoteListItem>, onOpen: (Long) -> Unit, onDelete: (NoteListItem) -> Unit, modifier: Modifier) {
     var query by rememberSaveable { mutableStateOf("") }
     val visible = notes.filter { SpanishText.foldForSearch(it.title + " " + it.preview).contains(SpanishText.foldForSearch(query)) }
     Column(modifier.fillMaxWidth().padding(16.dp)) {
@@ -278,7 +302,7 @@ private fun NoteLibrary(notes: List<NoteListItem>, onOpen: (Long) -> Unit, onDel
 
 internal enum class VoiceDock(val label: String) { RIGHT("Derecha"), BOTTOM("Debajo de la nota"), TOP("Encima de la nota"), FLOATING("Flotante sobre la nota") }
 
-/** Editing tools span the top. The audio panel docks, resizes or floats independently of capture. */
+/** Editing tools dock above or beside the page. The audio panel docks, resizes or floats independently of capture. */
 @Composable
 fun NotesWorkspace(
     entries: List<TranscriptEntry>, partial: String, body: TextFieldValue, automatic: Boolean, wide: Boolean,
@@ -299,19 +323,25 @@ fun NotesWorkspace(
     onAi: (String,Int,Int) -> Unit = {_,_,_->}, aiBusy: Boolean = false, aiInstalled: Boolean = false,
     aiProgress: String = "", onCancelAi: () -> Unit = {}, voiceLabel: String = "Voz", onVoiceOptions: () -> Unit = {}, onMoveTextSelection: () -> Unit = {},
 ) {
-    var panelOpen by rememberSaveable { mutableStateOf(false) }
-    var dock by rememberSaveable { mutableStateOf(VoiceDock.RIGHT) }
-    var requestedWidth by rememberSaveable { mutableFloatStateOf(420f) }
-    var requestedHeight by rememberSaveable { mutableFloatStateOf(380f) }
-    var floatingX by rememberSaveable { mutableFloatStateOf(.7f) }
-    var floatingY by rememberSaveable { mutableFloatStateOf(.15f) }
+    val workspacePrefs=rememberNoteWorkspacePreferences()
+    var panelOpen by rememberSaveable { mutableStateOf(workspacePrefs.getBoolean("panel-open",false)) }
+    var dock by rememberSaveable { mutableStateOf(runCatching { VoiceDock.valueOf(workspacePrefs.getString("dock","RIGHT")!!) }.getOrDefault(VoiceDock.RIGHT)) }
+    var requestedWidth by rememberSaveable { mutableFloatStateOf(workspacePrefs.getFloat("width",420f)) }
+    var requestedHeight by rememberSaveable { mutableFloatStateOf(workspacePrefs.getFloat("height",380f)) }
+    var floatingX by rememberSaveable { mutableFloatStateOf(workspacePrefs.getFloat("x",.7f)) }
+    var floatingY by rememberSaveable { mutableFloatStateOf(workspacePrefs.getFloat("y",.15f)) }
+    LaunchedEffect(panelOpen,dock,requestedWidth,requestedHeight,floatingX,floatingY) {workspacePrefs.edit().putBoolean("panel-open",panelOpen).putString("dock",dock.name).putFloat("width",requestedWidth).putFloat("height",requestedHeight).putFloat("x",floatingX).putFloat("y",floatingY).apply()}
     var sizeDialog by remember { mutableStateOf(false) }
     val editorState = rememberNoteEditorState()
     val keyboard = LocalSoftwareKeyboardController.current
     val density = LocalDensity.current
     BackHandler(panelOpen && allowBack) { panelOpen = false }
-    Column(modifier.fillMaxSize().imePadding()) {
-        NoteEditorToolbar(editorState, body, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk,
+    Row(modifier.fillMaxSize().imePadding()) {
+      if(editorState.toolbarSide) Box(Modifier.width(112.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
+        NoteEditorToolbar(editorState,body,ink,onInkChange,canUndoInk,canRedoInk,onUndoInk,onRedoInk,onFormat,textStyle,onAlign,onList,canUndoText,canRedoText,onUndoText,onRedoText,onMoveTextSelection)
+      }
+      Column(Modifier.weight(1f).fillMaxHeight()) {
+        if(!editorState.toolbarSide) NoteEditorToolbar(editorState, body, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk,
             onFormat, textStyle, onAlign, onList, canUndoText, canRedoText, onUndoText, onRedoText, onMoveTextSelection)
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val availableWidth = maxWidth.value; val availableHeight = maxHeight.value
@@ -404,6 +434,10 @@ fun NotesWorkspace(
         }
     }
 }
+}
+
+@Composable
+internal fun rememberNoteWorkspacePreferences() = LocalContext.current.getSharedPreferences("notes-workspace", android.content.Context.MODE_PRIVATE)
 
 @Composable
 private fun ResizeHandle(vertical: Boolean, onResize: (Float) -> Unit) {

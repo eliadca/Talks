@@ -30,6 +30,38 @@ class InkPageViewTest {
         return event(action, x, y, pressure, stylus).let { try { view.onTouchEvent(it) } finally { it.recycle() } }
     }
 
+    @Test fun shapesAndTheirBezierControlPointsCanBeEditedWithThePen() {
+        val page=page();page.tool=InkTool.SHAPE;page.shape=com.eliadca.talks.core.ink.NoteShape.BEZIER
+        send(page,MotionEvent.ACTION_DOWN,40f,50f);send(page,MotionEvent.ACTION_UP,180f,220f)
+        val stroke=page.document.strokes.single();assertTrue(stroke.bezier);assertEquals(4,stroke.points.size)
+        page.tool=InkTool.NODES;page.selection=setOf(stroke.id)
+        val control=stroke.points[1]
+        send(page,MotionEvent.ACTION_DOWN,control.x/2,control.y/2)
+        send(page,MotionEvent.ACTION_UP,control.x/2+30f,control.y/2+40f)
+        assertEquals(control.x+60f,page.document.strokes.single().points[1].x,0f)
+        assertEquals(control.y+80f,page.document.strokes.single().points[1].y,0f)
+        assertEquals(1,page.document.strokes.size)
+    }
+    @Test fun movingASelectionKeepsOtherObjectsAndFormattingAddedDuringTheGesture() {
+        val page=page();page.document=InkDocument().addStroke(PenKind.BALLPOINT,8,4f,listOf(InkPoint(100f,100f),InkPoint(300f,180f)));page.tool=InkTool.SELECT;page.selection=setOf(1L)
+        send(page,MotionEvent.ACTION_DOWN,80f,70f);send(page,MotionEvent.ACTION_MOVE,100f,90f)
+        val formatting=com.eliadca.talks.core.notes.NoteFormatting().apply(0,4) {it.copy(bold=true)}
+        page.document=page.document.copy(images=listOf(com.eliadca.talks.core.ink.NoteImage(2,"new image")),nextId=3,formatting=formatting)
+        send(page,MotionEvent.ACTION_UP,120f,110f)
+        assertEquals(180f,page.document.strokes.single().points.first().x,0f)
+        assertEquals(180f,page.document.strokes.single().points.first().y,0f)
+        assertEquals("new image",page.document.images.single().data);assertEquals(formatting,page.document.formatting)
+    }
+
+    @Test fun imagesUseTheSameSelectionMoveAndLockMechanismAsTextAndInk() {
+        val page=page();page.document=InkDocument(images=listOf(com.eliadca.talks.core.ink.NoteImage(1,"",x=100f,y=100f,width=400f,height=200f)),nextId=2);page.tool=InkTool.SELECT
+        send(page,MotionEvent.ACTION_DOWN,100f,100f);send(page,MotionEvent.ACTION_UP,100f,100f);assertEquals(setOf(1L),page.selection)
+        send(page,MotionEvent.ACTION_DOWN,100f,100f);send(page,MotionEvent.ACTION_UP,160f,140f)
+        assertEquals(220f,page.document.images.single().x,0f);assertEquals(180f,page.document.images.single().y,0f)
+        page.document=page.document.copy(lockedIds=setOf(1L));page.selection=emptySet()
+        send(page,MotionEvent.ACTION_DOWN,140f,110f);send(page,MotionEvent.ACTION_UP,140f,110f);assertTrue(page.selection.isEmpty())
+    }
+
     @Test fun stylusPressureIsSavedInPageCoordinatesAndFingerInputCanBeDisabled() {
         val page = page()
         page.stylusOnly = true

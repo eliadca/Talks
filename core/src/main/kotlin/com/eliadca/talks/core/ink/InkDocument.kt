@@ -12,7 +12,9 @@ data class InkPoint(val x: Float, val y: Float, val pressure: Float = .5f)
 enum class PenKind { BALLPOINT, PENCIL, FOUNTAIN, HIGHLIGHTER }
 
 @Serializable
-data class InkStroke(val id: Long, val kind: PenKind, val color: Int, val width: Float, val points: List<InkPoint>)
+data class InkStroke(val id: Long, val kind: PenKind, val color: Int, val width: Float, val points: List<InkPoint>, val geometric: Boolean = false,
+    val contours: List<List<InkPoint>> = emptyList(), val bezier: Boolean = false,
+    val fillColor: Int? = null, val gradientColor: Int? = null, val opacity: Float = 1f, val dashed: Boolean = false)
 
 @Serializable
 data class NoteTextBox(val id: Long, val text: String, val x: Float, val y: Float,
@@ -22,6 +24,11 @@ data class NoteTextBox(val id: Long, val text: String, val x: Float, val y: Floa
 @Serializable
 data class NoteTextFrame(val x: Float = 40f, val y: Float = 40f, val width: Float = 920f,
     val height: Float = 100f, val scale: Float = 1f)
+
+@Serializable
+data class NoteImage(val id:Long,val data:String,val x:Float=80f,val y:Float=160f,val width:Float=500f,val height:Float=350f,
+    val rotation:Float=0f,val cropLeft:Float=0f,val cropTop:Float=0f,val cropRight:Float=1f,val cropBottom:Float=1f,
+    val opacity:Float=1f,val foreground:Boolean=false)
 
 @Serializable
 data class RuledArea(val id: Long, val left: Float, val top: Float, val right: Float, val bottom: Float)
@@ -38,12 +45,21 @@ data class InkDocument(
     val formatting: NoteFormatting = NoteFormatting(),
     val textBoxes: List<NoteTextBox> = emptyList(),
     val bodyFrame: NoteTextFrame? = null,
+    val images: List<NoteImage> = emptyList(),
+    val paperColor: Int = 0xffffffff.toInt(),
+    val dotted: Boolean = false,
+    val lockedIds: Set<Long> = emptySet(),
+    val hiddenIds: Set<Long> = emptySet(),
+    val groups: List<Set<Long>> = emptyList(),
+    val gridVisible: Boolean = false,
+    val snapToGrid: Boolean = false,
+    val gridSpacing: Float = 40f,
 ) {
-    fun addStroke(kind: PenKind, color: Int, width: Float, points: List<InkPoint>): InkDocument {
+    fun addStroke(kind: PenKind, color: Int, width: Float, points: List<InkPoint>, geometric: Boolean = false): InkDocument {
         val valid = points.filter { it.x.isFinite() && it.y.isFinite() && it.pressure.isFinite() }
             .map { it.copy(x = it.x.coerceIn(0f, pageWidth), y = max(0f, it.y), pressure = it.pressure.coerceIn(0f, 1f)) }
         if (valid.isEmpty()) return this
-        return copy(strokes = strokes + InkStroke(nextId, kind, color, width.coerceIn(1f, 32f), valid),
+        return copy(strokes = strokes + InkStroke(nextId, kind, color, width.coerceIn(1f, 32f), valid, geometric),
             height = max(height, valid.maxOf { it.y } + 100), nextId = nextId + 1)
     }
 
@@ -59,32 +75,48 @@ data class InkDocument(
 
     /** Erases complete strokes crossed by the eraser, including fast movement between samples. */
     fun strokesHit(start: InkPoint, end: InkPoint, radius: Float): Set<Long> = strokes.filter { stroke ->
+        if(stroke.id in lockedIds || stroke.id in hiddenIds)return@filter false
         val tolerance = radius + stroke.width * (if (stroke.kind == PenKind.HIGHLIGHTER) 1.5f else .5f)
-        val path = stroke.points
+        val paths=stroke.resolvedPaths()
+        val path = paths.flatten()
         path.any { distanceToSegment(it, start, end) <= tolerance * tolerance } ||
-            path.zipWithNext().any { (a, b) ->
+            paths.any {part->part.zipWithNext().any { (a, b) ->
                 segmentsCross(a, b, start, end) || distanceToSegment(start, a, b) <= tolerance * tolerance ||
                     distanceToSegment(end, a, b) <= tolerance * tolerance
-            }
+            }} || (stroke.fillColor!=null && (stroke.containsPoint(start) || stroke.containsPoint(end)))
     }.map { it.id }.toSet()
 
     fun selectionBounds(ids: Set<Long>): InkBounds? {
-        val chosen = strokes.filter { it.id in ids }.flatMap { it.points }
+        val chosen = strokes.filter { it.id in ids }.flatMap { it.allPoints() }
         val boxes = textBoxes.filter { it.id in ids }
         val body = bodyFrame?.takeIf { MAIN_TEXT_ID in ids }?.let { listOf(InkPoint(it.x,it.y), InkPoint(it.x+it.width,it.y+it.height)) }.orEmpty()
-        val all = chosen + body + boxes.flatMap { listOf(InkPoint(it.x, it.y), InkPoint(it.x + it.width, it.y + it.height)) }
+        val imagePoints=images.filter {it.id in ids}.flatMap {image->listOf(InkPoint(image.x,image.y),InkPoint(image.x+image.width,image.y+image.height))}
+        val all = chosen + body + imagePoints + boxes.flatMap { listOf(InkPoint(it.x, it.y), InkPoint(it.x + it.width, it.y + it.height)) }
         if (all.isEmpty()) return null
         return InkBounds(all.minOf { it.x }, all.minOf { it.y }, all.maxOf { it.x }, all.maxOf { it.y })
     }
-    fun selectRectangle(bounds: InkBounds): Set<Long> = strokes.filter { stroke ->
-        stroke.points.any { bounds.contains(it.x, it.y) } || stroke.points.zipWithNext().any { (a, b) ->
+    private fun rectangleCandidates(bounds: InkBounds): Set<Long> = strokes.filter { stroke ->
+        stroke.allPoints().any { bounds.contains(it.x, it.y) } || stroke.resolvedPaths().flatten().zipWithNext().any { (a, b) ->
             val corners = listOf(InkPoint(bounds.left, bounds.top), InkPoint(bounds.right, bounds.top),
                 InkPoint(bounds.right, bounds.bottom), InkPoint(bounds.left, bounds.bottom))
             corners.indices.any { i -> segmentsCross(a, b, corners[i], corners[(i + 1) % 4]) }
         }
     }.map { it.id }.toSet() + textBoxes.filter { box ->
         box.x <= bounds.right && box.x + box.width >= bounds.left && box.y <= bounds.bottom && box.y + box.height >= bounds.top
-    }.map { it.id } + if (bodyFrame?.let { it.x <= bounds.right && it.x+it.width >= bounds.left && it.y<=bounds.bottom && it.y+it.height>=bounds.top } == true) setOf(MAIN_TEXT_ID) else emptySet()
+    }.map { it.id } + images.filter {it.x<=bounds.right && it.x+it.width>=bounds.left && it.y<=bounds.bottom && it.y+it.height>=bounds.top}.map {it.id} + if (bodyFrame?.let { it.x <= bounds.right && it.x+it.width >= bounds.left && it.y<=bounds.bottom && it.y+it.height>=bounds.top } == true) setOf(MAIN_TEXT_ID) else emptySet()
+
+    fun selectRectangle(bounds: InkBounds): Set<Long> = expandSelection(rectangleCandidates(bounds))
+
+    fun expandSelection(ids:Set<Long>):Set<Long> {
+        val merged=ids + groups.filter {group->group.any {it in ids}}.flatten()
+        return merged-lockedIds-hiddenIds
+    }
+    fun groupSelection(ids:Set<Long>):InkDocument {
+        val members=expandSelection(ids)
+        if(members.size<2)return this
+        return copy(groups=groups.filterNot {g->g.any {it in members}}+listOf(members))
+    }
+    fun ungroupSelection(ids:Set<Long>):InkDocument = copy(groups=groups.filterNot {g->g.any {it in ids}})
 
     fun addTextBox(text: String, y: Float = 160f): InkDocument {
         if (text.isBlank()) return this
@@ -95,7 +127,8 @@ data class InkDocument(
     }
 
     /** Group transforms keep pressure, ordering and colours, clamp to the paper, and grow its height. */
-    fun transformSelection(ids: Set<Long>, dx: Float = 0f, dy: Float = 0f, factor: Float = 1f): InkDocument {
+    fun transformSelection(requestedIds: Set<Long>, dx: Float = 0f, dy: Float = 0f, factor: Float = 1f): InkDocument {
+        val ids=requestedIds-lockedIds-hiddenIds
         if (!dx.isFinite() || !dy.isFinite() || !factor.isFinite()) return this
         val bounds = selectionBounds(ids) ?: return this
         val scale = factor.coerceIn(.1f, minOf(10f, pageWidth / maxOf(1f, bounds.right - bounds.left)))
@@ -104,25 +137,35 @@ data class InkDocument(
         val result = strokes.map { stroke -> if (stroke.id !in ids) stroke else stroke.copy(
             width = (stroke.width * scale).coerceIn(1f, 32f), points = stroke.points.map {
                 it.copy(x = x + (it.x - bounds.left) * scale, y = y + (it.y - bounds.top) * scale)
-            }) }
+            }, contours=stroke.contours.map {contour->contour.map {it.copy(x=x+(it.x-bounds.left)*scale,y=y+(it.y-bounds.top)*scale)}}) }
         val boxes = textBoxes.map { box -> if (box.id !in ids) box else box.copy(
             x = x + (box.x - bounds.left) * scale, y = y + (box.y - bounds.top) * scale,
             width = box.width * scale, height = box.height * scale, size = box.size * scale) }
         val frame = bodyFrame?.let { f -> if (MAIN_TEXT_ID !in ids) f else f.copy(
             x=x+(f.x-bounds.left)*scale, y=y+(f.y-bounds.top)*scale, width=f.width*scale, height=f.height*scale, scale=f.scale*scale) }
-        return copy(strokes = result, textBoxes = boxes, bodyFrame = frame, height = max(height, y + (bounds.bottom - bounds.top) * scale + 100))
+        val pictures=images.map {image->if(image.id !in ids)image else image.copy(x=x+(image.x-bounds.left)*scale,y=y+(image.y-bounds.top)*scale,width=image.width*scale,height=image.height*scale)}
+        return copy(strokes = result, textBoxes = boxes, images=pictures, bodyFrame = frame, height = max(height, y + (bounds.bottom - bounds.top) * scale + 100))
     }
-    fun duplicateSelection(ids: Set<Long>): InkDocument {
+    fun duplicateSelection(requestedIds: Set<Long>): InkDocument {
+        val ids=requestedIds-lockedIds-hiddenIds
         val chosen = strokes.filter { it.id in ids }
         val copies = chosen.mapIndexed { index, stroke -> stroke.copy(id = nextId + index) }
         val copyIds = copies.map { it.id }.toSet()
         val boxes = textBoxes.filter { it.id in ids }.mapIndexed { i, box -> box.copy(id = nextId + copies.size + i) }
-        return copy(strokes = strokes + copies, textBoxes = textBoxes + boxes, nextId = nextId + copies.size + boxes.size)
-            .transformSelection(copyIds + boxes.map { it.id }, 40f, 60f)
+        val pictures=images.filter {it.id in ids}.mapIndexed {i,image->image.copy(id=nextId+copies.size+boxes.size+i)}
+        val mapping=(chosen.map {it.id} + textBoxes.filter {it.id in ids}.map {it.id}+images.filter {it.id in ids}.map {it.id}).zip(copies.map {it.id}+boxes.map {it.id}+pictures.map {it.id}).toMap()
+        val copiedGroups=groups.map {g->g.mapNotNull {mapping[it]}.toSet()}.filter {it.size>1}
+        return copy(strokes = strokes + copies, textBoxes = textBoxes + boxes, images=images+pictures, groups=groups+copiedGroups, nextId = nextId + copies.size + boxes.size+pictures.size)
+            .transformSelection(copyIds + boxes.map { it.id } + pictures.map {it.id}, 40f, 60f)
+    }
+    fun removeSelection(ids:Set<Long>):InkDocument {
+        val removable=ids-lockedIds-MAIN_TEXT_ID
+        return copy(strokes=strokes.filterNot {it.id in removable},textBoxes=textBoxes.filterNot {it.id in removable},images=images.filterNot {it.id in removable},
+            hiddenIds=hiddenIds-removable,lockedIds=lockedIds-removable,groups=groups.map {it-removable}.filter {it.size>1})
     }
     fun resizePage(width: Float, newHeight: Float): InkDocument {
-        val contentRight = maxOf(strokes.flatMap { it.points }.maxOfOrNull { it.x } ?: 0f, areas.maxOfOrNull { it.right } ?: 0f, textBoxes.maxOfOrNull { it.x + it.width } ?: 0f, bodyFrame?.let { it.x+it.width } ?: 0f)
-        val contentBottom = maxOf(strokes.flatMap { it.points }.maxOfOrNull { it.y } ?: 0f, areas.maxOfOrNull { it.bottom } ?: 0f, textBoxes.maxOfOrNull { it.y + it.height } ?: 0f, bodyFrame?.let { it.y+it.height } ?: 0f)
+        val contentRight = maxOf(strokes.flatMap { it.allPoints() }.maxOfOrNull { it.x } ?: 0f, areas.maxOfOrNull { it.right } ?: 0f, textBoxes.maxOfOrNull { it.x + it.width } ?: 0f, bodyFrame?.let { it.x+it.width } ?: 0f,images.maxOfOrNull {it.x+it.width} ?: 0f)
+        val contentBottom = maxOf(strokes.flatMap { it.allPoints() }.maxOfOrNull { it.y } ?: 0f, areas.maxOfOrNull { it.bottom } ?: 0f, textBoxes.maxOfOrNull { it.y + it.height } ?: 0f, bodyFrame?.let { it.y+it.height } ?: 0f,images.maxOfOrNull {it.y+it.height} ?: 0f)
         return copy(pageWidth = maxOf(width.coerceIn(600f, 2400f), contentRight + 32), height = maxOf(newHeight.coerceIn(1000f, 20000f), contentBottom + 100))
     }
 

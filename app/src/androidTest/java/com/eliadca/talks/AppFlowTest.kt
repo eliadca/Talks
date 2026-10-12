@@ -124,6 +124,8 @@ class AppFlowTest {
 
     @Before
     fun prepare() {
+        context.getSharedPreferences("notes-workspace",Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences("notes-pencil",Context.MODE_PRIVATE).edit().clear().commit()
         InstrumentationRegistry.getInstrumentation().runOnMainSync { container.noteWorkspace.pause(); container.noteWorkspace.backToList(); container.noteWorkspace.consumeNavigationRequest() }
         runBlocking(Dispatchers.IO) {
             // Wait for the first-launch sample content, then start from an empty library.
@@ -570,6 +572,7 @@ class AppFlowTest {
         compose.onNodeWithContentDescription("Volver a notas").performClick()
         waitForText("Ideas de reunión")
         clickVisible("Ideas de reunión")
+        compose.onNodeWithContentDescription("Modo teclado").performClick()
         compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba", substring = true)
         compose.waitUntil(10000) {
             compose.onNodeWithTag("note-body").fetchSemanticsNode().config.getOrNull(SemanticsActions.CustomActions)?.isNotEmpty() == true
@@ -643,7 +646,7 @@ class AppFlowTest {
         compose.waitUntil(10000) { compose.onAllNodesWithTag("note-title").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("note-title").assertTextContains("Notas para tablet")
         compose.waitUntil(10000) { originalActivity.hasWindowFocus() }
-        compose.onNodeWithContentDescription("Abrir transcripción").performClick()
+        if(compose.onAllNodesWithTag("voice-panel").fetchSemanticsNodes().isEmpty())compose.onNodeWithContentDescription("Abrir transcripción").performClick()
         notification.notification.actions.single().actionIntent.send()
         compose.waitUntil(10000) { !container.noteWorkspace.listening }
         waitForText("Escuchar")

@@ -46,7 +46,7 @@ fun SettingsRoute(
     val context = LocalContext.current
     val container = context.container
     val scope = rememberCoroutineScope()
-    val backup = remember { BackupManager(container.database, context.contentResolver) }
+    val backup = remember { BackupManager(container.database, context.contentResolver,java.io.File(context.filesDir,"notes-templates.json")) }
     val model = container.voskModel
     val voskInstalled by model.installed.collectAsState()
 

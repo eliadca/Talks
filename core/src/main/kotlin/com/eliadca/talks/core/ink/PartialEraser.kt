@@ -7,10 +7,16 @@ fun InkDocument.erasePart(start: InkPoint, end: InkPoint, radius: Float): InkDoc
     if (!radius.isFinite() || radius <= 0 || !start.x.isFinite() || !start.y.isFinite() || !end.x.isFinite() || !end.y.isFinite()) return this
     var id = nextId
     var changed = false
+    val fragments=mutableMapOf<Long,MutableList<Long>>()
     val result = buildList {
         for (stroke in strokes) {
+            if(stroke.id in lockedIds || stroke.id in hiddenIds) {add(stroke);continue}
+            if(stroke.contours.isNotEmpty() || stroke.fillColor!=null) {
+                if(stroke.id in strokesHit(start,end,radius))changed=true else add(stroke)
+                continue
+            }
             val r = radius + stroke.width * if (stroke.kind == PenKind.HIGHLIGHTER) 1.5f else .85f
-            val path = stroke.points
+            val path = stroke.resolvedPaths().first()
             val left = min(start.x, end.x) - r; val right = max(start.x, end.x) + r
             val top = min(start.y, end.y) - r; val bottom = max(start.y, end.y) + r
             if (path.isEmpty() || path.maxOf { it.x } < left || path.minOf { it.x } > right || path.maxOf { it.y } < top || path.minOf { it.y } > bottom) {
@@ -47,10 +53,11 @@ fun InkDocument.erasePart(start: InkPoint, end: InkPoint, radius: Float): InkDoc
             if (!hit) { add(stroke); continue }
             changed = true
             pieces.filter { piece -> piece.size > 1 && piece.zipWithNext().any { (a,b) -> abs(a.x-b.x)+abs(a.y-b.y) > .001f } }
-                .forEachIndexed { index, piece -> add(stroke.copy(id = if (index == 0) stroke.id else id++, points = piece)) }
+                .forEachIndexed { index, piece -> val pieceId=if(index==0)stroke.id else id++;fragments.getOrPut(stroke.id){mutableListOf()}.add(pieceId);add(stroke.copy(id = pieceId, points = piece,bezier=false,fillColor=null,gradientColor=null)) }
         }
     }
-    return if (changed) copy(strokes = result, nextId = id) else this
+    val retained=result.map {it.id}.toSet()+textBoxes.map {it.id}+images.map {it.id}+InkDocument.MAIN_TEXT_ID
+    return if (changed) copy(strokes = result, nextId = id,groups=groups.map {g->g.flatMap {fragments[it] ?: listOf(it)}.toSet().intersect(retained)}.filter {it.size>1}) else this
 }
 
 private fun mix(a: InkPoint, b: InkPoint, t: Float) = InkPoint(a.x + (b.x-a.x)*t, a.y + (b.y-a.y)*t, a.pressure + (b.pressure-a.pressure)*t)

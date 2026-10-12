@@ -110,6 +110,25 @@ class NotesPersistenceTest {
         } finally { scope.cancel(); db.close() }
     }
 
+    @Test fun backupCarriesCustomTemplatesAndImagesWithoutDuplicatingTemplatesOnRestore() = runBlocking {
+        val db=Room.inMemoryDatabaseBuilder(context,TalksDatabase::class.java).build()
+        val destination=Room.inMemoryDatabaseBuilder(context,TalksDatabase::class.java).build()
+        val sourceFile=File(context.cacheDir,"source-templates.json");val restoredFile=File(context.cacheDir,"restored-templates.json")
+        try {
+            restoredFile.delete()
+            val drawing=InkDocument(images=listOf(com.eliadca.talks.core.ink.NoteImage(1,"embedded-image")),nextId=2)
+            val templates=listOf(com.eliadca.talks.core.ink.NotePageTemplate("custom","Mi hoja",drawing))
+            sourceFile.writeText(Json.encodeToString(templates))
+            db.notes().insert(NoteEntity(title="Con foto",body="Texto",createdAt=1,updatedAt=1,ink=Json.encodeToString(drawing)))
+            val backup=File(context.cacheDir,"template-backup.json");val uri=Uri.fromFile(backup)
+            BackupManager(db,context.contentResolver,sourceFile).export(uri)
+            val restore=BackupManager(destination,context.contentResolver,restoredFile)
+            restore.import(uri);restore.import(uri)
+            assertEquals(templates,Json.decodeFromString<List<com.eliadca.talks.core.ink.NotePageTemplate>>(restoredFile.readText()))
+            assertEquals(drawing,Json.decodeFromString<InkDocument>(destination.notes().all().single().ink))
+        }finally {sourceFile.delete();restoredFile.delete();db.close();destination.close()}
+    }
+
     @Test fun backupKeepsNotesAndTranscriptAndOldBackupsStillRestore() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(context, TalksDatabase::class.java).build()
         val destination = Room.inMemoryDatabaseBuilder(context, TalksDatabase::class.java).build()
