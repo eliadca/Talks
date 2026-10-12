@@ -90,7 +90,7 @@ class InkPageViewTest {
         send(page, MotionEvent.ACTION_UP, 150f, 175f, stylus = false)
         assertEquals(InkPoint(200f, 300f, .2f), page.document.strokes.single().points.first())
         val old = page.document
-        send(page, MotionEvent.ACTION_DOWN, 205f, 205f, stylus = false)
+        send(page, MotionEvent.ACTION_DOWN, 218f, 218f, stylus = false)
         send(page, MotionEvent.ACTION_MOVE, 260f, 260f, stylus = false)
         send(page, MotionEvent.ACTION_UP, 260f, 260f, stylus = false)
         assertTrue(page.document.strokes.single().width > old.strokes.single().width)
@@ -100,6 +100,17 @@ class InkPageViewTest {
         send(page, MotionEvent.ACTION_DOWN, 100f, 100f)
         send(page, MotionEvent.ACTION_UP, 120f, 120f)
         assertEquals(400f, page.document.strokes.last().points.first().x)
+    }
+
+    @Test fun aSingleDotMovesInsteadOfAccidentallyGrabbingItsResizeHandle() {
+        val page = page()
+        page.document = InkDocument().addStroke(PenKind.PENCIL, 1, 5f, listOf(InkPoint(200f, 200f, .5f)))
+        page.tool = InkTool.SELECT; page.selection = setOf(1)
+        send(page, MotionEvent.ACTION_DOWN, 100f, 100f)
+        send(page, MotionEvent.ACTION_MOVE, 150f, 180f)
+        send(page, MotionEvent.ACTION_UP, 150f, 180f)
+        assertEquals(InkPoint(300f, 360f, .5f), page.document.strokes.single().points.single())
+        assertEquals(5f, page.document.strokes.single().width)
     }
 
 }

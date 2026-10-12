@@ -95,9 +95,10 @@ class InkPageView(context: Context) : View(context) {
             (selectionPreview ?: document).selectionBounds(selection)?.let { box ->
                 paint.color = ruleColor; paint.alpha = 255; paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f / scale
                 paint.pathEffect = DashPathEffect(floatArrayOf(8f / scale, 5f / scale), 0f)
-                canvas.drawRect(RectF(box.left - 10, box.top - 10, box.right + 10, box.bottom + 10), paint)
+                val margin = 18f / scale
+                canvas.drawRect(RectF(box.left - margin, box.top - margin, box.right + margin, box.bottom + margin), paint)
                 paint.pathEffect = null; paint.style = Paint.Style.FILL
-                canvas.drawCircle(box.right + 10, box.bottom + 10, 8f / scale, paint)
+                canvas.drawCircle(box.right + margin, box.bottom + margin, 8f / scale, paint)
             }
         }
         canvas.restore()
@@ -170,7 +171,7 @@ class InkPageView(context: Context) : View(context) {
                     val p = points.first()
                     val bounds = document.selectionBounds(selection)
                     val tolerance = 24f / scale
-                    selectionResize = bounds != null && kotlin.math.hypot(p.x - bounds.right - 10, p.y - bounds.bottom - 10) <= tolerance
+                    selectionResize = bounds != null && kotlin.math.hypot(p.x - bounds.right - 18f / scale, p.y - bounds.bottom - 18f / scale) <= 14f / scale
                     selectionDrag = selectionResize || (bounds != null && p.x in (bounds.left - tolerance)..(bounds.right + tolerance) && p.y in (bounds.top - tolerance)..(bounds.bottom + tolerance))
                 }
             }

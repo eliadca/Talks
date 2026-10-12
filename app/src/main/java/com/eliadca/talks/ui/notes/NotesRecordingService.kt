@@ -29,8 +29,9 @@ class NotesRecordingService : Service() {
         try {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel(CHANNEL, "Transcripción de notas", NotificationManager.IMPORTANCE_LOW))
-            val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).setAction(OPEN_NOTE).putExtra("note", session.recordingNoteId ?: 0L)
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                .putExtra(OPEN_NOTE, true).putExtra("note", session.recordingNoteId ?: 0L)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val pause = PendingIntent.getService(this, 1, Intent(this, NotesRecordingService::class.java).setAction(PAUSE), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_note_microphone)
                 .setContentTitle("Transcribiendo · ${session.recordingTitle}")

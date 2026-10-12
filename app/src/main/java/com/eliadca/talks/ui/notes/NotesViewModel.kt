@@ -46,9 +46,9 @@ import kotlinx.serialization.json.Json
 data class TranscriptEntry(val id: Long, val text: String, val added: Boolean = false, val confirmed: Boolean = true,
     val originalText: String? = null)
 
-class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
+class NotesViewModel(private val app: Application, repository: com.eliadca.talks.data.NotesRepository? = null) : AndroidViewModel(app) {
     private val services = app.container
-    private val repo = services.notes
+    private val repo = repository ?: services.notes
     val items = repo.items.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<NoteListItem>())
     val saveError = repo.error
     var note by mutableStateOf<NoteEntity?>(null); private set
@@ -69,7 +69,7 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
     private val textPast = ArrayDeque<TextSnapshot>()
     private val textFuture = ArrayDeque<TextSnapshot>()
     private var recordingNote by mutableStateOf<NoteEntity?>(null)
-    val recordingNoteId get() = recordingNote?.id
+    val recordingNoteId get() = recordingNote?.id.takeIf { listening }
     val recordingTitle get() = recordingNote?.title?.ifBlank { "Sin título" }.orEmpty()
     private var recordingEntries = emptyList<TranscriptEntry>()
     var entries by mutableStateOf(emptyList<TranscriptEntry>()); private set
@@ -278,7 +278,7 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
         if (recordingNote?.id == id) pause()
         if (note?.id == id) backToList()
         viewModelScope.launch {
-            try { repo.delete(id) } catch (e: Exception) { report(e) }
+            try { repo.delete(id); if (recordingNote?.id == id) { recordingNote = null; recordingEntries = emptyList(); recordingInk = InkDocument() } } catch (e: Exception) { report(e) }
         }
     }
 
@@ -365,7 +365,8 @@ class NotesViewModel(private val app: Application) : AndroidViewModel(app) {
             capturePartial.trim(), confirmed = false))
         capturePartial = ""
         if (note != null) persist()
-        recordingNote = null; recordingEntries = emptyList(); recordingInk = InkDocument()
+        // Retain the last immutable capture snapshot: an already-running database read can
+        // have completed before the pause saved its final partial. Reopening uses this newer copy.
         NotesRecordingService.stop(app)
     }
 

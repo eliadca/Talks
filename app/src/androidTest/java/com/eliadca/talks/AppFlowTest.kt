@@ -601,6 +601,7 @@ class AppFlowTest {
 
     @Test
     fun notesHaveRichTextAndFullscreenAndCaptureContinuesWhileTheActivityIsMinimized() {
+        val originalActivity = compose.activity
         assertTrue(forceLandscape())
         val fake = FakeEngine(); container.speechEngineFactory = { fake }
         clickVisible("Menú"); clickVisible("Notas"); clickVisible("Nueva nota")
@@ -638,6 +639,7 @@ class AppFlowTest {
         notification.notification.contentIntent.send()
         compose.waitUntil(10000) { compose.onAllNodesWithTag("note-title").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("note-title").assertTextContains("Notas para tablet")
+        compose.waitUntil(10000) { originalActivity.hasWindowFocus() }
         compose.onNodeWithContentDescription("Abrir transcripción").performClick()
         notification.notification.actions.single().actionIntent.send()
         compose.waitUntil(10000) { !container.noteWorkspace.listening }

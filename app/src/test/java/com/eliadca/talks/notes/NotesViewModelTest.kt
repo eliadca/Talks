@@ -219,4 +219,37 @@ class NotesViewModelTest {
         }
     }
 
+    @Test fun pausingDuringAStaleDatabaseReadKeepsTheLastProvisionalWordsOnReopening() {
+        val real = app.container.database.notes()
+        var blockRead = false
+        val readStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val releaseRead = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val dao = object : com.eliadca.talks.data.db.NoteDao by real {
+            override suspend fun get(id: Long): com.eliadca.talks.data.db.NoteEntity? {
+                val old = real.get(id)
+                if (blockRead) { readStarted.complete(Unit); releaseRead.await() }
+                return old
+            }
+        }
+        val repo = com.eliadca.talks.data.NotesRepository(dao, app.container.scope)
+        val vm = NotesViewModel(app, repo); val store = ViewModelStore().also { it.put("notes", vm) }
+        val engine = Engine(); app.container.speechEngineFactory = { engine }
+        try {
+            vm.create(); until { vm.note != null }; val id = vm.note!!.id
+            vm.start(); until { vm.engineState == EngineState.LISTENING }
+            engine.final("Palabras confirmadas"); until { vm.entries.size == 1 }
+            engine.partial("Palabras antes de pausar"); until { vm.partial.isNotBlank() }
+            vm.backToList(); blockRead = true; vm.open(id); until { readStarted.isCompleted }
+            vm.pause(); releaseRead.complete(Unit); until { vm.note?.id == id }
+            assertEquals(listOf("Palabras confirmadas", "Palabras antes de pausar"), vm.entries.map { it.text })
+            assertFalse(vm.entries.last().confirmed); assertNull(vm.recordingNoteId)
+            vm.title("Conservar las últimas palabras"); vm.flushEdits()
+            blockRead = false
+            assertTrue(runBlocking { repo.load(id) }!!.transcript.contains("Palabras antes de pausar"))
+        } finally {
+            releaseRead.complete(Unit); store.clear(); runBlocking { repo.flush() }
+            app.container.scope.cancel(); app.container.database.close(); app.container.speechEngineFactory = null
+        }
+    }
+
 }

@@ -60,7 +60,8 @@ class MainActivity : ComponentActivity() {
      * assistant, for instance) keeps its formatting.
      */
     private fun handleIncoming(intent: Intent?) {
-        if (intent?.action == com.eliadca.talks.ui.notes.NotesRecordingService.OPEN_NOTE) {
+        if (intent?.action == com.eliadca.talks.ui.notes.NotesRecordingService.OPEN_NOTE ||
+            intent?.getBooleanExtra(com.eliadca.talks.ui.notes.NotesRecordingService.OPEN_NOTE, false) == true) {
             val id = intent.getLongExtra("note", 0)
             if (id > 0) container.noteWorkspace.requestOpenFromNotification(id)
             return
