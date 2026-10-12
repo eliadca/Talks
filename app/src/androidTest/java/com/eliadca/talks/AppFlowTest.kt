@@ -633,7 +633,7 @@ class AppFlowTest {
         compose.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
         compose.waitUntil(10000) { compose.activity.hasWindowFocus() }
         compose.onNodeWithContentDescription("Abrir transcripción").performClick()
-        waitForText("Sigue escuchando con la app minimizada")
+        compose.onNodeWithTag("transcript-text").assertTextEquals("Primera frase de la grabación La transcripción sigue con el panel cerrado Sigue escuchando con la app minimizada")
         val notification = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.single { it.id == 41 }
         compose.onNodeWithContentDescription("Volver a notas").performClick()
         waitForText("Nueva nota")
