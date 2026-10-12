@@ -105,7 +105,7 @@ internal fun NoteMediaTools(state:NoteEditorState,ink:InkDocument,onChange:(InkD
             HorizontalDivider();Text("Crear plantilla con esta hoja",style=MaterialTheme.typography.titleSmall)
             OutlinedTextField(name,{name=it},label={Text("Nombre de la plantilla")},singleLine=true)
             Text("Guarda papel, formas, imágenes, renglones y cuadros de texto. El texto principal de la nota no se incluye.",style=MaterialTheme.typography.bodySmall)
-            Button(onClick={val template=NotePageTemplate(java.util.UUID.randomUUID().toString(),name.trim(),ink.copy(bodyFrame=null,lockedIds=ink.lockedIds-InkDocument.MAIN_TEXT_ID,hiddenIds=ink.hiddenIds-InkDocument.MAIN_TEXT_ID,groups=ink.groups.map {it-InkDocument.MAIN_TEXT_ID}.filter {it.size>1},formatting=com.eliadca.talks.core.notes.NoteFormatting()));save(custom+template);name=""},enabled=loaded && !saving && name.isNotBlank()) {Text(if(saving)"Guardando…" else "Guardar plantilla")}
+            Button(onClick={val template=NotePageTemplate(java.util.UUID.randomUUID().toString(),name.trim(),ink.copy(lockedIds=ink.lockedIds-InkDocument.MAIN_TEXT_ID,hiddenIds=ink.hiddenIds-InkDocument.MAIN_TEXT_ID,groups=ink.groups.map {it-InkDocument.MAIN_TEXT_ID}.filter {it.size>1},formatting=com.eliadca.talks.core.notes.NoteFormatting()));save(custom+template);name=""},enabled=loaded && !saving && name.isNotBlank()) {Text(if(saving)"Guardando…" else "Guardar plantilla")}
             error?.let {Text(it,color=MaterialTheme.colorScheme.error)}
         }},confirmButton={TextButton(onClick={state.templates=false},enabled=!saving) {Text("Listo")}})
     }

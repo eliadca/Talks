@@ -20,13 +20,13 @@ internal object NoteSvgExport {
             if(image.id in ink.hiddenIds)return
             append("<g opacity=\"${image.opacity}\" transform=\"rotate(${image.rotation} ${image.x+image.width/2} ${image.y+image.height/2})\"><svg x=\"${image.x}\" y=\"${image.y}\" width=\"${image.width}\" height=\"${image.height}\" viewBox=\"${image.cropLeft} ${image.cropTop} ${image.cropRight-image.cropLeft} ${image.cropBottom-image.cropTop}\" preserveAspectRatio=\"none\"><image width=\"1\" height=\"1\" preserveAspectRatio=\"none\" href=\"data:image/png;base64,${image.data}\"/></svg></g>")
         }
-        ink.images.filterNot {it.foreground}.forEach(::picture)
         fun line(x1:Float,y1:Float,x2:Float,y2:Float) {append("<path d=\"M$x1 $y1 L$x2 $y2\" stroke=\"#a5b5c9\" stroke-width=\"1.5\" fill=\"none\"/>")}
         val grid=ink.gridSpacing.coerceIn(16f,160f)
         if(ink.gridVisible) {var x=grid;while(x<ink.pageWidth){line(x,0f,x,height);x+=grid};var y=grid;while(y<height){line(0f,y,ink.pageWidth,y);y+=grid}}
         if(ink.dotted) {var x=grid;while(x<ink.pageWidth){var y=grid;while(y<height){append("<circle cx=\"$x\" cy=\"$y\" r=\"1.6\" fill=\"#a5b5c9\"/>");y+=grid};x+=grid}}
         fun rules(l:Float,t:Float,r:Float,b:Float) {var y=t+ink.spacing.coerceIn(40f,100f);while(y<=b){line(l,y,r,y);y+=ink.spacing.coerceIn(40f,100f)}}
         if(ink.wholePageRuled)rules(32f,32f,ink.pageWidth-32,height) else ink.areas.forEach {rules(it.left,it.top,it.right,it.bottom)}
+        ink.images.filterNot {it.foreground}.forEach(::picture)
         for(s in ink.strokes)if(s.id !in ink.hiddenIds) {
             val path=buildString {(listOf(s.points)+s.contours).forEach {p->if(p.isNotEmpty()) {
                 append("M${p[0].x} ${p[0].y} ")

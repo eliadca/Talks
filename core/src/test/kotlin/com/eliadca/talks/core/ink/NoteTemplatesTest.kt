@@ -10,6 +10,7 @@ class NoteTemplatesTest {
         val old=InkDocument().addStroke(PenKind.PENCIL,7,5f,listOf(InkPoint(80f,80f),InkPoint(140f,140f))).addTextBox("Una idea").copy(images=listOf(NoteImage(3,"asset")),nextId=4)
         val template=NoteTemplates.builtIn().first {it.id=="cornell"}
         val changed=old.applyTemplate(template.document)
+        assertEquals(template.document.bodyFrame,changed.bodyFrame)
         assertEquals(old.strokes.first(),changed.strokes.first());assertEquals(old.textBoxes.first(),changed.textBoxes.first());assertEquals(old.images,changed.images)
         val ids=changed.strokes.map {it.id}+changed.textBoxes.map {it.id}+changed.images.map {it.id}
         assertEquals(ids.size,ids.distinct().size);assertTrue(changed.nextId>ids.max());assertTrue(changed.lockedIds.all {it>=4})

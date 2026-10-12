@@ -22,7 +22,7 @@ La integración es nativa Kotlin/Compose/Canvas para Android y S Pen. No carga e
 | Exportación | PDF paginado, PNG de toda la hoja, SVG con trazados/texto/imágenes; TXT de transcripción |
 | Voz | Transcripción continua editable, original conservado, Vosk independiente, IA local Qwen y Biblia de Estudio |
 
-Imágenes y propiedades vectoriales se guardan en el documento de la nota y viajan en la copia de seguridad. Las plantillas propias también se incluyen en la copia de seguridad desde Ajustes. La aplicación de una plantilla conserva el contenido previo y añade su decoración con identificadores nuevos; repetirla añade una segunda decoración, que puede deshacerse.
+Imágenes y propiedades vectoriales se guardan en el documento de la nota y viajan en la copia de seguridad. Las plantillas propias también se incluyen en la copia de seguridad desde Ajustes. La plantilla conserva una zona de escritura para el texto principal, sin incluir su contenido. Su aplicación conserva el contenido previo y añade su decoración con identificadores nuevos; repetirla añade una segunda decoración, que puede deshacerse.
 
 Los ajustes de editor y voz se recuperan como últimos valores predeterminados del dispositivo. La posición del contenido dentro de una nota pertenece a su documento. La escala y el desplazamiento de vista pertenecen al espacio de trabajo.
 

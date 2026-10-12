@@ -42,10 +42,10 @@ class NoteArtworkTest {
         val source=Bitmap.createBitmap(80,40,Bitmap.Config.ARGB_8888);val c=Canvas(source);c.drawColor(Color.BLUE);val p=Paint().apply {color=Color.GREEN};c.drawRect(40f,0f,80f,40f,p)
         val bytes=ByteArrayOutputStream().apply {source.compress(Bitmap.CompressFormat.PNG,100,this)}.toByteArray();source.recycle()
         val image=NoteImage(1,Base64.encodeToString(bytes,Base64.NO_WRAP),x=50f,y=50f,width=300f,height=150f,cropLeft=.5f)
-        val doc=InkDocument(images=listOf(image),nextId=2)
+        val doc=InkDocument(images=listOf(image),nextId=2,gridVisible=true)
         val context=ApplicationProvider.getApplicationContext<Application>()
         val png=ByteArrayOutputStream();NoteArtworkExport.write(context,doc,"", "png",png)
-        val output=BitmapFactory.decodeByteArray(png.toByteArray(),0,png.size());assertEquals(Color.GREEN,output.getPixel(100,100));output.recycle()
+        val output=BitmapFactory.decodeByteArray(png.toByteArray(),0,png.size());assertEquals(Color.GREEN,output.getPixel(80,80));output.recycle()
         val svg=NoteSvgExport.write(doc,"A < B & C");assertTrue(svg.contains("data:image/png;base64,"));assertTrue(svg.contains("&lt;"));assertTrue(svg.contains("&amp;"))
         DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(svg.byteInputStream())
     }

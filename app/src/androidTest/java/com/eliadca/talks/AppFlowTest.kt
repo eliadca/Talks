@@ -556,7 +556,7 @@ class AppFlowTest {
         compose.onNodeWithContentDescription("Añadir automáticamente").performClick()
         fake.hear("Leamos Jhan capítulo tres versículo dieciséis", final = true)
         waitForText("Añadir a nota")
-        compose.onNodeWithTag("floating-citation").assertExists()
+        compose.onNodeWithTag("floating-citation",useUnmergedTree=true).assertExists()
         compose.onNodeWithText("Añadir a nota").performClick()
         compose.onNodeWithTag("note-body").assertTextContains("Texto bíblico de prueba", substring = true)
         Shots.take("notes-transcript-citation")
@@ -581,14 +581,14 @@ class AppFlowTest {
         compose.onNodeWithTag("note-body").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val referencePosition = layouts.single().getBoundingBox(layouts.single().layoutInput.text.text.lastIndexOf("Juan 3:16") + 2).center
         compose.onNodeWithTag("note-body").performTouchInput { click(referencePosition) }
-        compose.onNodeWithTag("floating-citation").assertExists()
+        compose.onNodeWithTag("floating-citation",useUnmergedTree=true).assertExists()
         compose.onNodeWithContentDescription("Cerrar cita").performClick()
         val versePosition = layouts.single().getBoundingBox(layouts.single().layoutInput.text.text.lastIndexOf("Texto bíblico de prueba") + 2).center
         compose.onNodeWithTag("note-body").performTouchInput { click(versePosition) }
-        compose.onNodeWithTag("floating-citation").assertExists()
+        compose.onNodeWithTag("floating-citation",useUnmergedTree=true).assertExists()
         compose.onNodeWithContentDescription("Cerrar cita").performClick()
         compose.onNodeWithTag("note-body").performTouchInput { longClick(referencePosition, durationMillis = 700) }
-        compose.onNodeWithTag("floating-citation").assertDoesNotExist()
+        compose.onNodeWithTag("floating-citation",useUnmergedTree=true).assertDoesNotExist()
         assertTrue("long press must still select editable citation text",
             !compose.onNodeWithTag("note-body").fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange].collapsed)
         runBlocking {

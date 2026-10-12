@@ -105,7 +105,6 @@ class InkPageView(context: Context) : View(context) {
                 }
             }
         }
-        pictures(false)
         paint.style = Paint.Style.STROKE; paint.strokeWidth = 1.5f; paint.color = ruleColor
         paint.alpha = 100; paint.strokeCap = Paint.Cap.BUTT
         val spacing = document.spacing.coerceIn(40f, 100f)
@@ -126,6 +125,7 @@ class InkPageView(context: Context) : View(context) {
         }
         if (document.wholePageRuled) lines(32f, 32f, document.pageWidth - 32, height / scale)
         else document.areas.forEach { lines(it.left, it.top, it.right, it.bottom) }
+        pictures(false)
         val existing = (erasedPreview ?: selectionPreview ?: document).strokes.map { it.id }.toSet()
         rendered.keys.retainAll(existing)
         (erasedPreview ?: selectionPreview ?: document).strokes.filterNot { it.id in erased || it.id in document.hiddenIds }.forEach { drawStroke(canvas, it) }
