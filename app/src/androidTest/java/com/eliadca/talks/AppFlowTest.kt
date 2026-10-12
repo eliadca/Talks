@@ -636,6 +636,9 @@ class AppFlowTest {
         waitForText("Sigue escuchando con la app minimizada")
         val notification = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.single { it.id == 41 }
         compose.onNodeWithContentDescription("Volver a notas").performClick()
+        waitForText("Nueva nota")
+        compose.waitForIdle()
+        compose.onNodeWithTag("note-title").assertDoesNotExist()
         notification.notification.contentIntent.send()
         compose.waitUntil(10000) { compose.onAllNodesWithTag("note-title").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("note-title").assertTextContains("Notas para tablet")
