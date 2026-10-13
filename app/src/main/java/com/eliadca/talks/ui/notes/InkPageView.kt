@@ -134,9 +134,8 @@ class InkPageView(context: Context) : View(context) {
         textLayouts.keys.retainAll(boxes.map { it.id }.toSet())
         if (drawTextBoxes) boxes.forEach { box ->
             val layout = textLayouts[box.id]?.takeIf { it.first == box }?.second ?: run {
-                val p = TextPaint(textPaint).apply { textSize = box.size; color = box.color }
-                StaticLayout.Builder.obtain(box.text, 0, box.text.length, p, box.width.toInt().coerceAtLeast(1))
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false).build().also { textLayouts[box.id] = box to it }
+                NoteArtworkExport.layout(box.text,box.formatting,box.width,box.size,box.color,box.size/46f,context)
+                    .also { textLayouts[box.id] = box to it }
             }
             canvas.save(); canvas.translate(box.x, box.y); layout.draw(canvas); canvas.restore()
         }

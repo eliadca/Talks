@@ -336,14 +336,10 @@ fun NotesWorkspace(
     val keyboard = LocalSoftwareKeyboardController.current
     val density = LocalDensity.current
     BackHandler(panelOpen && allowBack) { panelOpen = false }
-    Row(modifier.fillMaxSize().imePadding()) {
-      if(editorState.toolbarSide) Box(Modifier.width(112.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
-        NoteEditorToolbar(editorState,body,ink,onInkChange,canUndoInk,canRedoInk,onUndoInk,onRedoInk,onFormat,textStyle,onAlign,onList,canUndoText,canRedoText,onUndoText,onRedoText,onMoveTextSelection)
-      }
-      Column(Modifier.weight(1f).fillMaxHeight()) {
-        if(!editorState.toolbarSide) NoteEditorToolbar(editorState, body, ink, onInkChange, canUndoInk, canRedoInk, onUndoInk, onRedoInk,
-            onFormat, textStyle, onAlign, onList, canUndoText, canRedoText, onUndoText, onRedoText, onMoveTextSelection)
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+    NoteStudio(editorState,body,ink,onInkChange,canUndoInk,canRedoInk,onUndoInk,onRedoInk,modifier.fillMaxSize().imePadding(),
+        onFormat,textStyle,onAlign,onList,canUndoText,canRedoText,onUndoText,onRedoText,onMoveTextSelection,crowded=panelOpen && dock==VoiceDock.RIGHT) {canvasModifier->
+        BoxWithConstraints(canvasModifier) {
+
             val availableWidth = maxWidth.value; val availableHeight = maxHeight.value
             val panelWidth = requestedWidth.coerceIn(minOf(280f, availableWidth), if (wide && dock == VoiceDock.RIGHT) maxOf(280f, availableWidth - 280f) else availableWidth)
             val panelHeight = requestedHeight.coerceIn(minOf(260f, availableHeight),
@@ -408,7 +404,7 @@ fun NotesWorkspace(
                         else Modifier.align(Alignment.CenterEnd).width(panelWidth.dp).fillMaxHeight())
                 }
             }
-            if (!panelOpen) FloatingActionButton(onClick = { keyboard?.hide(); panelOpen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+            if (!panelOpen) FloatingActionButton(onClick = { keyboard?.hide(); editorState.inspectorOpen=false; panelOpen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
                 .semantics { stateDescription = if (listening) "Escuchando" else "Micrófono pausado" },
                 shape = RoundedCornerShape(22.dp), containerColor = MaterialTheme.colorScheme.primary) {
                 Box {
@@ -433,7 +429,6 @@ fun NotesWorkspace(
             }, confirmButton = { TextButton(onClick = { sizeDialog = false }) { Text("Listo") } })
         }
     }
-}
 }
 
 @Composable

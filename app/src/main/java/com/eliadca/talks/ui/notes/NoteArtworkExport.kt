@@ -12,10 +12,11 @@ import kotlin.math.ceil
 
 /** Uses the same ink renderer as the editor and Android's rich-text layout. */
 internal object NoteArtworkExport {
-    internal fun layout(text:String,format:NoteFormatting,width:Float,size:Float,color:Int,scale:Float):StaticLayout {
+    internal fun layout(text:String,format:NoteFormatting,width:Float,size:Float,color:Int,scale:Float,context:Context?=null):StaticLayout {
         val rich=SpannableString(text)
         fun span(value:Any,a:Int,b:Int) {val start=a.coerceIn(0,text.length);val end=b.coerceIn(start,text.length);if(end>start)rich.setSpan(value,start,end,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)}
         format.spans.forEach {r->val s=r.style
+            span(NoteFonts.span(context,s.font,s.bold,s.italic,s.tracking,s.size),r.start,r.end)
             if(s.bold || s.italic)span(StyleSpan(if(s.bold && s.italic)Typeface.BOLD_ITALIC else if(s.bold)Typeface.BOLD else Typeface.ITALIC),r.start,r.end)
             if(s.underline)span(UnderlineSpan(),r.start,r.end)
             if(s.strike)span(StrikethroughSpan(),r.start,r.end)
@@ -28,10 +29,10 @@ internal object NoteArtworkExport {
         return StaticLayout.Builder.obtain(rich,0,rich.length,paint,width.toInt().coerceAtLeast(1)).setIncludePad(false).setLineSpacing(0f,1.39f).build()
     }
     fun write(context:Context,ink:InkDocument,body:String,format:String,output:OutputStream) {
-        if(format=="svg") {output.write(NoteSvgExport.write(ink,body).toByteArray(Charsets.UTF_8));return}
+        if(format=="svg") {output.write(NoteSvgExport.write(ink,body,context).toByteArray(Charsets.UTF_8));return}
         val frame=ink.bodyFrame ?: NoteTextFrame(width=ink.pageWidth-80f)
-        val main=layout(body,ink.formatting,frame.width,46f,Color.rgb(35,43,60),frame.scale)
-        val boxes=ink.textBoxes.filterNot {it.id in ink.hiddenIds}.associate {it.id to layout(it.text,it.formatting,it.width,it.size,it.color,it.size/46f)}
+        val main=layout(body,ink.formatting,frame.width,46f,Color.rgb(35,43,60),frame.scale,context)
+        val boxes=ink.textBoxes.filterNot {it.id in ink.hiddenIds}.associate {it.id to layout(it.text,it.formatting,it.width,it.size,it.color,it.size/46f,context)}
         val height=maxOf(ink.height,if(InkDocument.MAIN_TEXT_ID in ink.hiddenIds)0f else frame.y+main.height+40,ink.textBoxes.maxOfOrNull {it.y+(boxes[it.id]?.height ?: 0)+40} ?: 0f)
         require(ink.pageWidth.isFinite() && height.isFinite() && ink.pageWidth in 1f..10000f && height in 1f..50000f) {"La hoja es demasiado grande para exportar."}
         val page=InkPageView(context).apply {document=ink;tool=InkTool.MOVE;drawTextBoxes=false;layout(0,0,ceil(ink.pageWidth.toDouble()).toInt(),ceil(height.toDouble()).toInt())}

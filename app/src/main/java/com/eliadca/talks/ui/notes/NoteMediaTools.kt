@@ -73,7 +73,7 @@ internal fun NoteMediaTools(state:NoteEditorState,ink:InkDocument,onChange:(InkD
     if(state.templates) {
         val file=remember {File(context.filesDir,"notes-templates.json")}
         var custom by remember {mutableStateOf(emptyList<NotePageTemplate>())}
-        var name by remember {mutableStateOf("")};var error by remember {mutableStateOf<String?>(null)}
+        var error by remember {mutableStateOf<String?>(null)}
         var exporting by remember {mutableStateOf<NotePageTemplate?>(null)}
         val exportTemplate=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) {uri->val template=exporting;exporting=null;if(uri!=null && template!=null)scope.launch {try {withContext(Dispatchers.IO){context.contentResolver.openOutputStream(uri)?.use {it.write(Json.encodeToString(template).toByteArray(Charsets.UTF_8))} ?: error("No se pudo abrir el archivo.")}}catch(e:Exception){error="No se pudo exportar la plantilla."}}}
         var loaded by remember {mutableStateOf(false)};var saving by remember {mutableStateOf(false)}
@@ -94,19 +94,12 @@ internal fun NoteMediaTools(state:NoteEditorState,ink:InkDocument,onChange:(InkD
                 save(custom+template)
             }catch(e:Exception){if(e is kotlinx.coroutines.CancellationException)throw e;error=e.message ?: "No se pudo importar la plantilla."}
         }}
-        AlertDialog(onDismissRequest={if(!saving)state.templates=false},title={Text("Plantillas de hojas")},text={Column(Modifier.heightIn(max=520.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-            Text("Aplicar conserva lo que ya escribiste y añade los elementos de la plantilla. Puedes deshacer la operación.",style=MaterialTheme.typography.bodySmall)
-            (NoteTemplates.builtIn()+custom).forEach {template->Row(verticalAlignment=Alignment.CenterVertically) {
-                TextButton(onClick={onChange(ink.applyTemplate(template.document));state.templates=false},modifier=Modifier.weight(1f)) {Text(template.name)}
-                TextButton(onClick={exporting=template;exportTemplate.launch(template.name.replace(Regex("[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ _-]"),"_")+".talktemplate.json")}) {Text("Exportar")}
-                if(template in custom)TextButton(onClick={save(custom.filterNot {it.id==template.id})},enabled=!saving) {Text("Eliminar")}
-            }}
-            TextButton(onClick={importTemplate.launch(arrayOf("application/json","text/plain","application/octet-stream"))},enabled=loaded && !saving) {Text("Importar plantilla")}
-            HorizontalDivider();Text("Crear plantilla con esta hoja",style=MaterialTheme.typography.titleSmall)
-            OutlinedTextField(name,{name=it},label={Text("Nombre de la plantilla")},singleLine=true)
-            Text("Guarda papel, formas, imágenes, renglones y cuadros de texto. El texto principal de la nota no se incluye.",style=MaterialTheme.typography.bodySmall)
-            Button(onClick={val template=NotePageTemplate(java.util.UUID.randomUUID().toString(),name.trim(),ink.copy(lockedIds=ink.lockedIds-InkDocument.MAIN_TEXT_ID,hiddenIds=ink.hiddenIds-InkDocument.MAIN_TEXT_ID,groups=ink.groups.map {it-InkDocument.MAIN_TEXT_ID}.filter {it.size>1},formatting=com.eliadca.talks.core.notes.NoteFormatting()));save(custom+template);name=""},enabled=loaded && !saving && name.isNotBlank()) {Text(if(saving)"Guardando…" else "Guardar plantilla")}
-            error?.let {Text(it,color=MaterialTheme.colorScheme.error)}
-        }},confirmButton={TextButton(onClick={state.templates=false},enabled=!saving) {Text("Listo")}})
+        TemplateGallery(custom,!loaded || saving,error,
+            onApply={template->onChange(ink.applyTemplate(template.document));state.templates=false},
+            onSave={title->val template=NotePageTemplate(java.util.UUID.randomUUID().toString(),title,ink.copy(lockedIds=ink.lockedIds-InkDocument.MAIN_TEXT_ID,hiddenIds=ink.hiddenIds-InkDocument.MAIN_TEXT_ID,groups=ink.groups.map {it-InkDocument.MAIN_TEXT_ID}.filter {it.size>1},formatting=com.eliadca.talks.core.notes.NoteFormatting()));save(custom+template)},
+            onImport={importTemplate.launch(arrayOf("application/json","text/plain","application/octet-stream"))},
+            onExport={template->exporting=template;exportTemplate.launch(template.name.replace(Regex("[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ _-]"),"_")+".talktemplate.json")},
+            onDelete={template->save(custom.filterNot {it.id==template.id})},onClose={state.templates=false})
+
     }
 }

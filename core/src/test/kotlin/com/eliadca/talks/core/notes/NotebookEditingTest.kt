@@ -7,6 +7,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NotebookEditingTest {
+    @Test fun fontSizeAndTrackingSurviveTypingMovingAndLegacyNotesStillDecode() {
+        val style=NoteTextStyle(font=NoteFont.LORA,size=72f,tracking=2f,bold=true)
+        val format=NoteFormatting().apply(0,4) {style}.replace("Idea","Idea nueva")
+        assertEquals(style,format.styleAt(7))
+        val ink=InkDocument().addTextBox("Idea nueva").let {it.copy(textBoxes=it.textBoxes.map {box->box.copy(formatting=format)})}
+            .transformSelection(setOf(1L),200f,100f,1.5f)
+        val saved=Json.decodeFromString<InkDocument>(Json.encodeToString(ink))
+        assertEquals(style,saved.textBoxes.single().formatting.styleAt(7))
+        assertEquals(NoteFont.SYSTEM,Json.decodeFromString<NoteTextStyle>("{\"bold\":true,\"size\":46}").font)
+    }
     @Test fun formattingSurvivesTypingReplacingAndRemovingASelection() {
         val bold = NoteFormatting().apply(0, 5) { it.copy(bold = true, color = 0xff1565c0.toInt()) }
         val typed = bold.replace("Hello world", "Hello! world")

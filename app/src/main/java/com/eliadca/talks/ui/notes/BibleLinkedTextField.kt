@@ -95,17 +95,27 @@ fun BibleLinkedTextField(
                     if (b > a) with(span.style) {
                         val decorations = buildList { if (underline) add(TextDecoration.Underline); if (strike) add(TextDecoration.LineThrough) }
                         builder.addStyle(SpanStyle(fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+                            fontFamily = NoteFonts.family(font), letterSpacing = (tracking * textScale).sp,
                             fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
                             textDecoration = TextDecoration.combine(decorations), fontSize = (size * textScale).sp,
                             color = span.style.color?.let { Color(it) } ?: Color.Unspecified,
                             background = span.style.highlight?.let { Color(it) } ?: Color.Unspecified), a, b)
                     }
                 }
-                formatting.paragraphs.forEach { paragraph ->
-                    val a = paragraph.start.coerceIn(0, text.length); val b = paragraph.end.coerceIn(a, text.length)
-                    if (b > a) builder.addStyle(ParagraphStyle(textAlign = when (paragraph.alignment) {
+                // A large font must also enlarge its line box. Fixed leading caused overlapping
+                // lines in free text boxes; compute leading per paragraph, including mixed sizes.
+                var start = 0
+                while (start < text.length) {
+                    val lineEnd = text.text.indexOf('\n', start).takeIf { it >= 0 } ?: text.length
+                    val end = if (lineEnd < text.length) lineEnd + 1 else lineEnd
+                    val boundaries = (listOf(start, lineEnd) + formatting.spans.flatMap { listOf(it.start, it.end) }
+                        .filter { it > start && it < lineEnd }).distinct().sorted()
+                    val size = boundaries.zipWithNext().maxOfOrNull { (a, _) -> formatting.styleAt(a).size } ?: 46f
+                    val alignment = formatting.paragraphs.lastOrNull { start >= it.start && start < it.end }?.alignment ?: 0
+                    builder.addStyle(ParagraphStyle(lineHeight = (size * textScale * 1.39f).sp, textAlign = when (alignment) {
                         1 -> TextAlign.Center; 2 -> TextAlign.End; 3 -> TextAlign.Justify; else -> TextAlign.Start
-                    }), a, b)
+                    }), start, end)
+                    start = end
                 }
                 matches.filter { it.end <= text.length }.forEach {
                     val quoteEnd = quoteEnds[it] ?: it.end

@@ -7,13 +7,19 @@ import com.eliadca.talks.core.notes.NoteFormatting
 internal object NoteSvgExport {
     private fun xml(text:String)=text.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;")
     private fun color(value:Int)="#%06x".format(value and 0xffffff)
-    fun write(ink:InkDocument,body:String):String = buildString {
+    fun write(ink:InkDocument,body:String,context:android.content.Context?=null):String = buildString {
         val frame=ink.bodyFrame ?: NoteTextFrame(width=ink.pageWidth-80f)
-        val layout=NoteArtworkExport.layout(body,ink.formatting,frame.width,46f,0xff232b3c.toInt(),frame.scale)
+        val layout=NoteArtworkExport.layout(body,ink.formatting,frame.width,46f,0xff232b3c.toInt(),frame.scale,context)
         val height=maxOf(ink.height,frame.y+layout.height+40)
         append("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${ink.pageWidth}\" height=\"$height\" viewBox=\"0 0 ${ink.pageWidth} $height\">")
         append("<rect width=\"100%\" height=\"100%\" fill=\"${color(ink.paperColor)}\"/>")
         append("<defs>")
+        if(context!=null) {
+            val fonts=(ink.formatting.spans+ink.textBoxes.flatMap {it.formatting.spans}).map {it.style.font}.distinct()
+            fonts.forEach {font->NoteFonts.bytes(context,font)?.let {bytes->
+                append("<style>@font-face{font-family:'${NoteFonts.svgFamily(font)}';src:url(data:font/ttf;base64,${android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP)})}</style>")
+            }}
+        }
         for(s in ink.strokes)if(s.gradientColor!=null && s.fillColor!=null)append("<linearGradient id=\"g${s.id}\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0\" stop-color=\"${color(s.fillColor!!)}\"/><stop offset=\"1\" stop-color=\"${color(s.gradientColor!!)}\"/></linearGradient>")
         append("</defs>")
         fun picture(image:NoteImage) {
@@ -44,13 +50,13 @@ internal object NoteSvgExport {
         }
         ink.images.filter {it.foreground}.forEach(::picture)
         fun text(value:String,format:NoteFormatting,x:Float,y:Float,width:Float,size:Float,baseColor:Int,scale:Float) {
-            val lines=NoteArtworkExport.layout(value,format,width,size,baseColor,scale)
+            val lines=NoteArtworkExport.layout(value,format,width,size,baseColor,scale,context)
             for(i in 0 until lines.lineCount) {
                 val start=lines.getLineStart(i);val end=lines.getLineEnd(i)
                 append("<text xml:space=\"preserve\" x=\"${x+lines.getLineLeft(i)}\" y=\"${y+lines.getLineBaseline(i)}\" font-family=\"sans-serif\" font-size=\"${size*scale}\" fill=\"${color(baseColor)}\">")
                 val boundaries=(listOf(start,end)+format.spans.flatMap {listOf(it.start,it.end)}.filter {it>start && it<end}).distinct().sorted()
                 boundaries.zipWithNext().forEach {(a,b)->val s=format.styleAt(a)
-                    append("<tspan font-size=\"${s.size*scale}\" fill=\"${color(s.color ?: baseColor)}\" font-weight=\"${if(s.bold)"bold" else "normal"}\" font-style=\"${if(s.italic)"italic" else "normal"}\"")
+                    append("<tspan font-family=\"${NoteFonts.svgFamily(s.font)}\" font-size=\"${s.size*scale}\" letter-spacing=\"${s.tracking*scale}\" fill=\"${color(s.color ?: baseColor)}\" font-weight=\"${if(s.bold)"bold" else "normal"}\" font-style=\"${if(s.italic)"italic" else "normal"}\"")
                     if(s.underline || s.strike)append(" text-decoration=\"${listOfNotNull(if(s.underline)"underline" else null,if(s.strike)"line-through" else null).joinToString(" ")}\"")
                     append(">${xml(value.substring(a,b).trimEnd('\n'))}</tspan>")
                 }

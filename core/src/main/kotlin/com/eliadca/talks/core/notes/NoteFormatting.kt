@@ -3,9 +3,13 @@ package com.eliadca.talks.core.notes
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class NoteFont { SYSTEM, INTER, LORA, NUNITO, MONO, HAND, CAVEAT }
+
+@Serializable
 data class NoteTextStyle(
     val bold: Boolean = false, val italic: Boolean = false, val underline: Boolean = false,
     val strike: Boolean = false, val size: Float = 46f, val color: Int? = null, val highlight: Int? = null,
+    val font: NoteFont = NoteFont.SYSTEM, val tracking: Float = 0f,
 )
 @Serializable
 data class NoteTextSpan(val start: Int, val end: Int, val style: NoteTextStyle)

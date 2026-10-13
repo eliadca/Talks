@@ -27,6 +27,8 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.printToLog
@@ -659,6 +661,47 @@ class AppFlowTest {
             assertTrue(ink.formatting.styleAt(5).bold)
         }
         Shots.take("notes-tablet-editor")
+    }
+
+    @Test
+    fun tabletStudioHasLiveTypographyToolPropertiesAndAVisualTemplateGallery() {
+        assertTrue(forceLandscape())
+        clickVisible("Menú");clickVisible("Notas");clickVisible("Nueva nota")
+        compose.onNodeWithTag("note-body").performTextInput("Ideas para estudiar")
+        androidx.test.espresso.Espresso.closeSoftKeyboard()
+        compose.onNodeWithTag("note-body").performTextInputSelection(androidx.compose.ui.text.TextRange(0,5))
+        compose.onNodeWithContentDescription("Familia tipográfica").performClick()
+        compose.onNodeWithText("Lora").performClick()
+        compose.onNodeWithContentDescription("Tamaño del texto").performTextReplacement("72")
+        compose.onNodeWithContentDescription("Tamaño del texto").performImeAction()
+        androidx.test.espresso.Espresso.closeSoftKeyboard()
+        compose.runOnUiThread {container.noteWorkspace.flushEdits()}
+        runBlocking {
+            container.notes.flush()
+            val note=container.database.notes().all().single()
+            val ink=kotlinx.serialization.json.Json.decodeFromString<com.eliadca.talks.core.ink.InkDocument>(note.ink)
+            assertEquals(com.eliadca.talks.core.notes.NoteFont.LORA,ink.formatting.styleAt(0).font)
+            assertEquals(72f,ink.formatting.styleAt(0).size)
+            assertEquals(com.eliadca.talks.core.notes.NoteFont.SYSTEM,ink.formatting.styleAt(7).font)
+        }
+        Shots.take("notes-studio-text")
+        compose.onNodeWithContentDescription("Goma de borrar").performClick()
+        compose.onNodeWithText("Borrar solo lo que toco").assertIsDisplayed()
+        Shots.take("notes-studio-eraser")
+        compose.onNodeWithContentDescription("Plantillas de hojas").performClick()
+        compose.onNodeWithTag("template-gallery").assertExists()
+        compose.onNodeWithContentDescription("Vista previa de Cornell / estudio").performClick()
+        Shots.take("notes-studio-templates")
+        compose.onNodeWithTag("apply-template").performClick()
+        compose.runOnUiThread {container.noteWorkspace.flushEdits()}
+        runBlocking {
+            container.notes.flush()
+            val note=container.database.notes().all().single()
+            val ink=kotlinx.serialization.json.Json.decodeFromString<com.eliadca.talks.core.ink.InkDocument>(note.ink)
+            assertEquals(310f,ink.bodyFrame!!.x)
+            assertEquals("Ideas para estudiar",note.body)
+            assertEquals(com.eliadca.talks.core.notes.NoteFont.LORA,ink.formatting.styleAt(0).font)
+        }
     }
 
     @Test

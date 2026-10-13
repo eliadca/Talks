@@ -19,6 +19,17 @@ import javax.xml.parsers.DocumentBuilderFactory
 @Config(sdk=[34],application=Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NoteArtworkTest {
+    @Test fun bundledFontsChangeActualTextMetricsAndTravelInsideSvgExports() {
+        val context=ApplicationProvider.getApplicationContext<Application>()
+        val text="Ideas que inspiran 123"
+        fun format(font:com.eliadca.talks.core.notes.NoteFont)=com.eliadca.talks.core.notes.NoteFormatting().apply(0,text.length) {it.copy(font=font,size=60f)}
+        val serif=NoteArtworkExport.layout(text,format(com.eliadca.talks.core.notes.NoteFont.LORA),900f,46f,Color.BLACK,1f,context)
+        val mono=NoteArtworkExport.layout(text,format(com.eliadca.talks.core.notes.NoteFont.MONO),900f,46f,Color.BLACK,1f,context)
+        assertNotEquals(serif.getLineWidth(0),mono.getLineWidth(0),1f)
+        val svg=NoteSvgExport.write(InkDocument(formatting=format(com.eliadca.talks.core.notes.NoteFont.LORA)),text,context)
+        assertTrue(svg.contains("font-family=\"Lora\""));assertTrue(svg.contains("data:font/ttf;base64,"))
+        DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(svg.byteInputStream())
+    }
     private fun rectangle(id:Long,l:Float,t:Float,r:Float,b:Float)=InkStroke(id,PenKind.BALLPOINT,Color.RED,4f,shapePoints(NoteShape.RECTANGLE,InkPoint(l,t),InkPoint(r,b)),geometric=true,fillColor=Color.RED)
     @Test fun booleanDifferenceKeepsTheHoleAsAContourAndUndoCanRestoreTheSources() {
         val original=InkDocument(strokes=listOf(rectangle(1,40f,40f,400f,400f),rectangle(2,120f,120f,300f,300f)),nextId=3)

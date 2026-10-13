@@ -51,18 +51,46 @@ class NotesUiTest {
     @get:Rule val compose = createComposeRule()
     private val entries = listOf(TranscriptEntry(1, "La primera idea importante."), TranscriptEntry(2, "Otra idea que merece una nota."))
 
-    @Test fun penAndEraserSelectWithATapAndConfigureOnlyOnLongPress() {
-        compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Una idea"),{},InkDocument(),{},false,false,{},{},Modifier.fillMaxSize())}}
-        compose.onNodeWithContentDescription("Modo lápiz").performClick()
+    @Test fun tappingToolsRevealsLivePropertiesAndLongPressOpensTheToolGroup() {
+        val state=com.eliadca.talks.ui.notes.NoteEditorState().apply {toolbarSide=true}
+        compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Una idea"),{},InkDocument(),{},false,false,{},{},Modifier.fillMaxSize(),state=state)}}
         compose.onNodeWithContentDescription("Goma de borrar").performClick()
-        compose.onNodeWithText("Tamaño:",substring=true).assertDoesNotExist()
-        compose.onNodeWithContentDescription("Goma de borrar").performTouchInput {longClick()}
         compose.onNodeWithText("Borrar solo lo que toco").assertIsDisplayed()
-        compose.onNodeWithText("Listo").performClick()
+        compose.onNodeWithContentDescription("Tamaño de goma").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) {it(40f)}
+        compose.runOnIdle {assertEquals(40f,state.eraserRadius)}
         compose.onNodeWithContentDescription("Lápiz").performClick()
-        compose.onNodeWithText("Grosor:",substring=true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Grosor del lápiz").assertIsDisplayed()
         compose.onNodeWithContentDescription("Lápiz").performTouchInput {longClick()}
-        compose.onNodeWithText("Grosor:",substring=true).assertExists()
+        compose.onAllNodesWithText("Pluma").onLast().performClick()
+        compose.runOnIdle {assertEquals(com.eliadca.talks.core.ink.PenKind.FOUNTAIN,state.pen)}
+        screenshot("notes-studio-pen")
+    }
+
+    @Test fun visibleTypographyControlsFormatMovableTextAndPersistTheFontAndSize() {
+        val state=com.eliadca.talks.ui.notes.NoteEditorState().apply {tool=com.eliadca.talks.ui.notes.InkTool.SELECT;toolbarSide=true;selected=setOf(1L)}
+        var ink by mutableStateOf(InkDocument().addTextBox("Una idea editable").copy(textBoxes=listOf(com.eliadca.talks.core.ink.NoteTextBox(1,"Una idea editable",80f,160f,size=32f)),nextId=2))
+        compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Texto principal"),{},ink,{ink=it},false,false,{},{},Modifier.fillMaxSize(),state=state)}}
+        compose.onNodeWithContentDescription("Familia tipográfica").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Lora").performClick()
+        compose.onNodeWithContentDescription("Tamaño del texto").performTextReplacement("72")
+        compose.onNodeWithContentDescription("Tamaño del texto").performImeAction()
+        compose.runOnIdle {
+            val style=ink.textBoxes.single().formatting.styleAt(0)
+            assertEquals(com.eliadca.talks.core.notes.NoteFont.LORA,style.font)
+            assertEquals(72f,style.size*ink.textBoxes.single().size/46f,.01f)
+            assertTrue(ink.formatting.spans.isEmpty())
+        }
+        val layouts=mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        compose.onNodeWithTag("text-box-1").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) {it(layouts)}
+        assertTrue(layouts.single().getLineBaseline(1)-layouts.single().getLineBaseline(0)>45f)
+        screenshot("notes-studio-typography")
+        compose.onNodeWithContentDescription("Transformar Ancho").performTextReplacement("360")
+        compose.onNodeWithContentDescription("Transformar Ancho").performImeAction()
+        compose.runOnIdle {
+            assertEquals(360f,ink.textBoxes.single().width)
+            assertEquals(32f,ink.textBoxes.single().size)
+            assertEquals(72f,ink.textBoxes.single().formatting.styleAt(0).size*32f/46f,.01f)
+        }
     }
 
     @Test fun workspacePlacementAndZoomSurviveClosingAndReopeningTheEditor() {
@@ -78,7 +106,7 @@ class NotesUiTest {
         compose.onNodeWithTag("voice-panel").assertExists()
         compose.onNodeWithContentDescription("Tamaño de hoja y zoom").performScrollTo().performClick()
         compose.onNodeWithText("Zoom: 140%").assertIsDisplayed()
-        compose.onNodeWithText("Aplicar").performClick()
+        compose.onNodeWithContentDescription("Cerrar inspector").performClick()
         screenshot("notes-advanced-side-tools")
     }
 
@@ -86,11 +114,13 @@ class NotesUiTest {
         var ink by mutableStateOf(InkDocument())
         compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Una idea"),{},ink,{ink=it},false,false,{},{},Modifier.fillMaxSize())}}
         compose.onNodeWithContentDescription("Formas y líneas").performScrollTo().performClick()
-        compose.onNodeWithText("Rectángulo").performClick()
+        compose.onNodeWithTag("shape-menu-RECTANGLE").performClick()
         compose.onNodeWithTag("ink-page").performTouchInput {swipe(Offset(80f,120f),Offset(250f,280f),200)}
         compose.runOnIdle {assertEquals(1,ink.strokes.size);assertTrue(ink.strokes.single().geometric)}
         compose.onNodeWithContentDescription("Plantillas de hojas").performScrollTo().performClick()
         compose.onNodeWithText("Puntos").performClick()
+        screenshotNode("notes-studio-template-gallery","template-gallery")
+        compose.onNodeWithTag("apply-template").performClick()
         compose.runOnIdle {assertTrue(ink.dotted);assertEquals(1,ink.strokes.size)}
         screenshot("notes-vector-shape-template")
     }
@@ -98,11 +128,11 @@ class NotesUiTest {
     @Test fun textSelectionDoesNotOfferVectorOnlyActionsThatCannotApply() {
         val state=com.eliadca.talks.ui.notes.NoteEditorState().apply {tool=com.eliadca.talks.ui.notes.InkTool.SELECT;selected=setOf(InkDocument.MAIN_TEXT_ID)}
         compose.setContent {MaterialTheme {HandwritingNotePanel(TextFieldValue("Una idea"),{},InkDocument(bodyFrame=com.eliadca.talks.core.ink.NoteTextFrame()),{},false,false,{},{},Modifier.fillMaxSize(),state=state)}}
-        compose.onNodeWithContentDescription("Relleno, degradado y apariencia").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithContentDescription("Transformación precisa y estilo").performScrollTo().performClick()
-        compose.onNodeWithText("Color y grosor del lápiz").assertIsNotEnabled()
-        compose.onNodeWithText("Traer adelante").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("Enviar atrás").assertIsNotEnabled()
+        compose.onNodeWithText("APARIENCIA").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Transformar X").assertExists()
+        compose.onNodeWithContentDescription("Duplicar trazos").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Eliminar trazos seleccionados").assertIsNotEnabled()
+
     }
 
     @Test fun imagesTemplatesAndGradientVectorsShareAFullTabletWorkspace() {
@@ -122,6 +152,18 @@ class NotesUiTest {
         compose.setContent {MaterialTheme {NotesWorkspace(entries,"",TextFieldValue("Proyecto de estudio\nImágenes, formas y notas en una misma hoja."),false,true,{},{},{},Modifier.fillMaxSize(),ink=ink,onInkChange={ink=it})}}
         compose.onNodeWithTag("voice-panel").assertExists();compose.onNodeWithTag("text-box-3").assertExists()
         screenshot("notes-high-end-workspace")
+    }
+
+    private fun screenshotNode(name:String,tag:String) {
+        val dir=System.getenv("TALKS_SCREENSHOT_DIR") ?: return
+        compose.onNodeWithTag(tag).assertExists()
+        val output=File(dir,"$name.png").also {it.parentFile!!.mkdirs()}
+        compose.runOnUiThread {
+            val view=org.robolectric.shadows.ShadowDialog.getLatestDialog().window!!.decorView
+            val bitmap=Bitmap.createBitmap(view.width,view.height,Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
+            output.outputStream().use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+        }
     }
 
     private fun screenshot(name: String) {
@@ -255,10 +297,9 @@ class NotesUiTest {
         compose.onNodeWithContentDescription("Deshacer escritura").performClick()
         compose.runOnIdle { assertTrue(ink.strokes.isEmpty()) }
         compose.onNodeWithContentDescription("Rehacer escritura").performClick()
-        compose.onNodeWithContentDescription("Tipo, grosor y color del lápiz").performScrollTo().performClick()
-        compose.onNodeWithText("Resaltador").performClick()
+        compose.onNodeWithContentDescription("Resaltador").performScrollTo().performClick()
         compose.onNodeWithContentDescription("Color #1565C0").performClick()
-        compose.onNodeWithText("Listo").performClick()
+        compose.onNodeWithContentDescription("Cerrar inspector").performClick()
         compose.runOnIdle { assertTrue(ink.strokes.isNotEmpty()) }
         compose.onNodeWithContentDescription("Renglones").performScrollTo().performClick()
         compose.onNodeWithContentDescription("Renglones en toda la página").performClick()
@@ -283,7 +324,9 @@ class NotesUiTest {
         compose.onNodeWithTag("text-box-1").performTextInputSelection(TextRange(0,4))
         compose.onNodeWithContentDescription("Negrita").performClick()
         compose.runOnIdle {assertTrue(ink.textBoxes.single().formatting.styleAt(0).bold);assertTrue(ink.formatting.spans.isEmpty())}
-        compose.onNodeWithContentDescription("Lista de tareas").performClick()
+        if(compose.onAllNodesWithTag("studio-inspector").fetchSemanticsNodes().isEmpty())
+            compose.onNodeWithContentDescription("Mostrar u ocultar inspector").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Lista de tareas").performScrollTo().performClick()
         compose.runOnIdle {assertTrue(ink.textBoxes.single().text.startsWith("☐ "))}
         screenshot("notes-movable-text")
     }
@@ -311,9 +354,9 @@ class NotesUiTest {
         }
         compose.onNodeWithTag("voice-panel").assertDoesNotExist()
         compose.onNodeWithText("Escuchar").assertDoesNotExist()
-        val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+        val root = compose.onNodeWithTag("studio-canvas").fetchSemanticsNode().boundsInRoot
         val button = compose.onNodeWithContentDescription("Abrir transcripción").fetchSemanticsNode().boundsInRoot
-        assertTrue(button.center.x > root.width * .8f && button.center.y > root.height * .8f)
+        assertTrue(button.center.x > root.left+root.width * .8f && button.center.y > root.top+root.height * .8f)
         compose.onNodeWithContentDescription("Abrir transcripción").performClick()
         assertEquals(0, starts)
         val note = compose.onNodeWithTag("note-body").fetchSemanticsNode().boundsInRoot
@@ -392,9 +435,10 @@ class NotesUiTest {
         compose.onNodeWithContentDescription("Duplicar trazos").performClick()
         compose.runOnIdle { assertEquals(2, ink.textBoxes.size) }
         compose.onNodeWithContentDescription("Tamaño de hoja y zoom").performClick()
-        compose.onNodeWithContentDescription("Ancho de hoja").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1600f) }
-        compose.onNodeWithContentDescription("Altura de hoja").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(3000f) }
-        compose.onNodeWithText("Aplicar").performClick()
+        compose.onNodeWithContentDescription("Transformar Ancho de hoja").performTextReplacement("1600")
+        compose.onNodeWithContentDescription("Transformar Ancho de hoja").performImeAction()
+        compose.onNodeWithContentDescription("Transformar Alto de hoja").performTextReplacement("3000")
+        compose.onNodeWithContentDescription("Transformar Alto de hoja").performImeAction()
         compose.runOnIdle { assertEquals(1600f, ink.pageWidth); assertEquals(3000f, ink.height) }
         screenshot("notes-large-paper")
     }
