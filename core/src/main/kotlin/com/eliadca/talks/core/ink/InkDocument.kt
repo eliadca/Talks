@@ -135,7 +135,7 @@ data class InkDocument(
         val x = (bounds.left + dx).coerceIn(0f, maxOf(0f, pageWidth - (bounds.right - bounds.left) * scale))
         val y = maxOf(0f, bounds.top + dy)
         val result = strokes.map { stroke -> if (stroke.id !in ids) stroke else stroke.copy(
-            width = (stroke.width * scale).coerceIn(1f, 32f), points = stroke.points.map {
+            width = (stroke.width * scale).coerceIn(.1f, 1000f), points = stroke.points.map {
                 it.copy(x = x + (it.x - bounds.left) * scale, y = y + (it.y - bounds.top) * scale)
             }, contours=stroke.contours.map {contour->contour.map {it.copy(x=x+(it.x-bounds.left)*scale,y=y+(it.y-bounds.top)*scale)}}) }
         val boxes = textBoxes.map { box -> if (box.id !in ids) box else box.copy(

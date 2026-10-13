@@ -7,6 +7,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NotebookEditingTest {
+    @Test fun movingRotatingAndScalingWideStrokesPreservesTheirAppearance() {
+        val doc=InkDocument(strokes=listOf(InkStroke(1,PenKind.FOUNTAIN,12,100f,listOf(InkPoint(120f,120f,.2f),InkPoint(520f,220f,.8f)))),nextId=2)
+        val moved=doc.transformSelection(setOf(1L),80f,120f)
+        assertEquals(100f,moved.strokes.single().width)
+        assertEquals(.2f,moved.strokes.single().points.first().pressure)
+        assertEquals(100f,doc.rotateInk(setOf(1L),15f).strokes.single().width)
+        assertEquals(200f,doc.transformSelection(setOf(1L),factor=2f).strokes.single().width)
+    }
     @Test fun fontSizeAndTrackingSurviveTypingMovingAndLegacyNotesStillDecode() {
         val style=NoteTextStyle(font=NoteFont.LORA,size=72f,tracking=2f,bold=true)
         val format=NoteFormatting().apply(0,4) {style}.replace("Idea","Idea nueva")

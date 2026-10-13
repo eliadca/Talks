@@ -136,8 +136,9 @@ class NotesUiTest {
         compose.onNodeWithTag("ink-page").performTouchInput {swipe(Offset(80f,120f),Offset(250f,280f),200)}
         compose.runOnIdle {assertEquals(1,ink.strokes.size);assertTrue(ink.strokes.single().geometric)}
         compose.onNodeWithContentDescription("Plantillas de hojas").performScrollTo().performClick()
-        compose.onNodeWithText("Puntos").performClick()
+        compose.onNodeWithContentDescription("Vista previa de Puntos").performClick()
         screenshotNode("notes-studio-template-gallery","template-gallery")
+        compose.waitUntil(5000) {compose.onAllNodes(hasTestTag("apply-template") and hasText("Aplicar Puntos") and isEnabled()).fetchSemanticsNodes().isNotEmpty()}
         compose.onNodeWithTag("apply-template").performClick()
         compose.runOnIdle {assertTrue(ink.dotted);assertEquals(1,ink.strokes.size)}
         screenshot("notes-vector-shape-template")

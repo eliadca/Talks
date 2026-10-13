@@ -29,6 +29,8 @@ import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.printToLog
@@ -693,6 +695,7 @@ class AppFlowTest {
         compose.onNodeWithText("Estudio y agenda").performClick()
         compose.onNodeWithContentDescription("Vista previa de Cornell / estudio").performClick()
         Shots.take("notes-studio-templates")
+        compose.waitUntil(5000) {compose.onAllNodes(hasTestTag("apply-template") and hasText("Aplicar Cornell / estudio") and isEnabled()).fetchSemanticsNodes().isNotEmpty()}
         compose.onNodeWithTag("apply-template").performClick()
         compose.runOnUiThread {container.noteWorkspace.flushEdits()}
         runBlocking {
