@@ -14,7 +14,7 @@ sealed interface SpeechEvent {
     data class Partial(val text: String) : SpeechEvent
 
     /** The recogniser's final answer for a stretch of speech. */
-    data class Final(val text: String) : SpeechEvent
+    data class Final(val text: String, val confidence: Float? = null, val alternatives: List<String> = emptyList()) : SpeechEvent
 
     /** Microphone loudness from 0 to 1, when the engine can tell. */
     data class Level(val value: Float) : SpeechEvent

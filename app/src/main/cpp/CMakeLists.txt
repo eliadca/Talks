@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.22)
+project(talks_notes_ai LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
+set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
+include(FetchContent)
+FetchContent_Declare(llama
+  URL https://codeload.github.com/ggml-org/llama.cpp/tar.gz/8bb3cf0d216a5ae48360179f2931daf284be4d01
+  URL_HASH SHA256=1b1a5bd079840425683ff6caebf3543e08d2dbcab7563782fabdf145030521a2)
+FetchContent_MakeAvailable(llama)
+add_library(talks_notes_ai SHARED notes_ai.cpp)
+target_link_libraries(talks_notes_ai PRIVATE llama)
+# NDK 28 produces 16 KB aligned libraries for recent Android tablets.

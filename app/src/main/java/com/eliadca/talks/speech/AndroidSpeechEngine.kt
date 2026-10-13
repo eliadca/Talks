@@ -35,6 +35,7 @@ class AndroidSpeechEngine(
         val preferOffline: Boolean,
         val forceGoogleService: Boolean,
         val muteSounds: Boolean,
+        val notesMode: Boolean = false,
     )
 
     override val name: String = "Android"
@@ -161,7 +162,8 @@ class AndroidSpeechEngine(
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, config.language)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, config.language)
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, if(config.notesMode) 3 else 1)
+        if(config.notesMode && Build.VERSION.SDK_INT >= 33) putExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING, RecognizerIntent.FORMATTING_OPTIMIZE_QUALITY)
         putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         if (config.preferOffline) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         // Ask the service to wait longer through pauses; services that ignore this just end earlier.

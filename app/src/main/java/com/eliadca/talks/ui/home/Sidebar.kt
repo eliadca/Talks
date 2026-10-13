@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,8 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.IconButton
@@ -63,32 +66,40 @@ fun LibraryRail(
     onFilter: (LibraryFilter) -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    onMenu: (() -> Unit)? = null,
+    onNotes: (() -> Unit)? = null,
+    notesSelected: Boolean = false,
 ) {
     val colors = MaterialTheme.colorScheme
-    Column(
-        modifier
-            .background(colors.background)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 10.dp, vertical = 14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        androidx.compose.material3.Surface(
-            onClick = onNewSpeech,
-            shape = RoundedCornerShape(20.dp),
-            color = colors.primary,
-            contentColor = colors.onPrimary,
-            shadowElevation = 6.dp,
-            modifier = Modifier.size(60.dp),
+    BoxWithConstraints(modifier) {
+        val compact = maxHeight < 680.dp
+        Column(
+            Modifier.fillMaxWidth()
+                .background(colors.background)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 10.dp, vertical = if (compact) 8.dp else 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 10.dp),
         ) {
-            Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.Add, contentDescription = "Nuevo discurso", modifier = Modifier.size(28.dp)) }
+            if (onMenu != null) RailButton(Icons.Filled.Menu, "Menú", false, compact = compact, onClick = onMenu)
+            androidx.compose.material3.Surface(
+                onClick = onNewSpeech,
+                shape = RoundedCornerShape(20.dp),
+                color = colors.primary,
+                contentColor = colors.onPrimary,
+                shadowElevation = 6.dp,
+                modifier = Modifier.size(if (compact) 48.dp else 60.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.Add, contentDescription = "Nuevo discurso", modifier = Modifier.size(28.dp)) }
+            }
+            Spacer(Modifier.height(6.dp))
+            RailButton(Icons.Filled.Description, "Todos", !notesSelected && filter == LibraryFilter.All, compact = compact) { onFilter(LibraryFilter.All) }
+            if (onNotes != null) RailButton(Icons.Filled.EditNote, "Notas", notesSelected, compact = compact, onClick = onNotes)
+            RailButton(Icons.Filled.PushPin, "Fijados", !notesSelected && filter == LibraryFilter.Pinned, compact = compact) { onFilter(LibraryFilter.Pinned) }
+            RailButton(Icons.Filled.Folder, "Carpetas", !notesSelected && filter.isFolderLocation, compact = compact) { onFilter(LibraryFilter.Folders) }
+            RailButton(Icons.Filled.Delete, "Papelera", !notesSelected && filter == LibraryFilter.Trash, badge = counts.trash, compact = compact) { onFilter(LibraryFilter.Trash) }
+            RailButton(Icons.Filled.Settings, "Ajustes", false, compact = compact, onClick = onSettings)
         }
-        Spacer(Modifier.height(6.dp))
-        RailButton(Icons.Filled.Description, "Todos", filter == LibraryFilter.All) { onFilter(LibraryFilter.All) }
-        RailButton(Icons.Filled.PushPin, "Fijados", filter == LibraryFilter.Pinned) { onFilter(LibraryFilter.Pinned) }
-        RailButton(Icons.Filled.Folder, "Carpetas", filter.isFolderLocation) { onFilter(LibraryFilter.Folders) }
-        RailButton(Icons.Filled.Delete, "Papelera", filter == LibraryFilter.Trash, badge = counts.trash) { onFilter(LibraryFilter.Trash) }
-        RailButton(Icons.Filled.Settings, "Ajustes", false, onClick = onSettings)
     }
 }
 
@@ -97,13 +108,13 @@ internal val LibraryFilter.isFolderLocation: Boolean
 
 /** A floating button of the rail: a soft raised tile with its label under it. */
 @Composable
-private fun RailButton(icon: ImageVector, label: String, selected: Boolean, badge: Int = 0, onClick: () -> Unit) {
+private fun RailButton(icon: ImageVector, label: String, selected: Boolean, badge: Int = 0, compact: Boolean = false, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Column(
         Modifier
             .clip(RoundedCornerShape(18.dp))
             .combinedClickable(onClick = onClick)
-            .padding(vertical = 4.dp, horizontal = 2.dp),
+            .padding(vertical = if (compact) 2.dp else 4.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         androidx.compose.material3.Surface(
@@ -111,7 +122,7 @@ private fun RailButton(icon: ImageVector, label: String, selected: Boolean, badg
             color = if (selected) colors.primaryContainer else colors.background,
             contentColor = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
             shadowElevation = if (selected) 2.dp else 5.dp,
-            modifier = Modifier.size(width = 56.dp, height = 46.dp),
+            modifier = Modifier.size(width = 56.dp, height = if (compact) 30.dp else 46.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (badge > 0) {
@@ -121,7 +132,7 @@ private fun RailButton(icon: ImageVector, label: String, selected: Boolean, badg
                 }
             }
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(if (compact) 2.dp else 5.dp))
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
@@ -132,7 +143,7 @@ private fun RailButton(icon: ImageVector, label: String, selected: Boolean, badg
     }
 }
 
-/** The full menu opens over the screen and navigates to the library panes. */
+/** The expanded version fits in the same left menu area. */
 @Composable
 fun SidebarContent(
     filter: LibraryFilter,
@@ -143,6 +154,8 @@ fun SidebarContent(
     modifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
     importActions: ImportActions? = null,
+    onNotes: (() -> Unit)? = null,
+    notesSelected: Boolean = false,
 ) {
     var importMenu by remember { mutableStateOf(false) }
 
@@ -179,13 +192,14 @@ fun SidebarContent(
         }
         Spacer(Modifier.height(14.dp))
 
-        NavRow(Icons.Filled.Description, "Todos los discursos", counts.all, filter == LibraryFilter.All) { onFilter(LibraryFilter.All) }
-        NavRow(Icons.Filled.PushPin, "Fijados", counts.pinned, filter == LibraryFilter.Pinned) { onFilter(LibraryFilter.Pinned) }
-        NavRow(Icons.Filled.Folder, "Carpetas", null, filter.isFolderLocation) { onFilter(LibraryFilter.Folders) }
+        NavRow(Icons.Filled.Description, "Todos los discursos", counts.all, !notesSelected && filter == LibraryFilter.All) { onFilter(LibraryFilter.All) }
+        if (onNotes != null) NavRow(Icons.Filled.EditNote, "Notas", null, notesSelected, onClick = onNotes)
+        NavRow(Icons.Filled.PushPin, "Fijados", counts.pinned, !notesSelected && filter == LibraryFilter.Pinned) { onFilter(LibraryFilter.Pinned) }
+        NavRow(Icons.Filled.Folder, "Carpetas", null, !notesSelected && filter.isFolderLocation) { onFilter(LibraryFilter.Folders) }
 
         Spacer(Modifier.height(8.dp))
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
-        NavRow(Icons.Filled.Delete, "Papelera", counts.trash, filter == LibraryFilter.Trash) { onFilter(LibraryFilter.Trash) }
+        NavRow(Icons.Filled.Delete, "Papelera", counts.trash, !notesSelected && filter == LibraryFilter.Trash) { onFilter(LibraryFilter.Trash) }
         NavRow(Icons.Filled.Settings, "Ajustes", null, false) { onSettings() }
     }
 

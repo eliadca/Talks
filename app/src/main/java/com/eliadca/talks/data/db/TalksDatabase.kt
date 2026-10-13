@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -11,8 +13,9 @@ import androidx.room.RoomDatabase
         SpeechEntity::class,
         VersionEntity::class,
         TalkSessionEntity::class,
+        NoteEntity::class,
     ],
-    version = 1,
+    version = 4,
     exportSchema = false,
 )
 abstract class TalksDatabase : RoomDatabase() {
@@ -20,9 +23,30 @@ abstract class TalksDatabase : RoomDatabase() {
     abstract fun folders(): FolderDao
     abstract fun versions(): VersionDao
     abstract fun sessions(): SessionDao
+    abstract fun notes(): NoteDao
 
     companion object {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, transcript TEXT NOT NULL, automatic INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_notes_updatedAt ON notes (updatedAt)")
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN ink TEXT NOT NULL DEFAULT '{}'")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN capture TEXT NOT NULL DEFAULT '{}'")
+            }
+        }
+
         fun build(context: Context): TalksDatabase =
-            Room.databaseBuilder(context.applicationContext, TalksDatabase::class.java, "talks.db").build()
+            Room.databaseBuilder(context.applicationContext, TalksDatabase::class.java, "talks.db")
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     }
 }

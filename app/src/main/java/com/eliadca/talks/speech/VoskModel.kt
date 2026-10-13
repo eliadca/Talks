@@ -24,9 +24,9 @@ sealed interface ModelDownload {
 }
 
 /** Keeps the offline Spanish model for the Vosk engine: download, import from a file, remove. */
-class VoskModelManager(private val context: Context) {
+class VoskModelManager(private val context: Context, private val advanced: Boolean = false) {
 
-    val modelDir: File get() = File(context.filesDir, "vosk/model-es")
+    val modelDir: File get() = File(context.filesDir, if (advanced) "vosk/model-es-advanced" else "vosk/model-es")
 
     fun isInstalled(): Boolean = File(modelDir, "am/final.mdl").exists()
 
@@ -39,23 +39,31 @@ class VoskModelManager(private val context: Context) {
     /** Downloads the small Spanish model (about 40 MB) and installs it. */
     fun download(): Flow<ModelDownload> = flow {
         val root = File(context.filesDir, "vosk").apply { mkdirs() }
-        val part = File(root, "model.zip.part")
+        val part = File(root, if (advanced) "advanced.zip.part" else "model.zip.part")
+        var connection: HttpURLConnection?=null
         try {
             emit(ModelDownload.Progress(0f))
-            val conn = (URL(MODEL_URL).openConnection() as HttpURLConnection).apply {
+            val conn = (URL(if (advanced) ADVANCED_MODEL_URL else MODEL_URL).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15_000
                 readTimeout = 30_000
                 instanceFollowRedirects = true
             }
-            if (conn.responseCode !in 200..299) {
+            connection=conn
+            val offset=part.takeIf {advanced}?.length() ?: 0L
+            if(offset>0)conn.setRequestProperty("Range","bytes=$offset-")
+            val response=conn.responseCode
+            if (response !in 200..299) {
                 emit(ModelDownload.Failed("El servidor respondió ${conn.responseCode}."))
                 return@flow
             }
-            val total = conn.contentLengthLong
+            val resume=response==206 && offset>0
+            if(resume)check(conn.getHeaderField("Content-Range")?.startsWith("bytes $offset-")==true) {"No se pudo reanudar la descarga."}
+            val total = conn.contentLengthLong + if(resume)offset else 0
+            emit(ModelDownload.Progress(if(total>0 && resume)offset.toFloat()/total else 0f))
             conn.inputStream.use { input ->
-                FileOutputStream(part).use { out ->
+                FileOutputStream(part,resume).use { out ->
                     val buffer = ByteArray(64 * 1024)
-                    var done = 0L
+                    var done = if(resume)offset else 0L
                     var lastEmit = 0L
                     while (true) {
                         currentCoroutineContext().ensureActive()
@@ -72,13 +80,15 @@ class VoskModelManager(private val context: Context) {
             }
             emit(ModelDownload.Installing)
             part.inputStream().use { install(it) }
+            part.delete(); conn.disconnect()
             emit(ModelDownload.Done)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             emit(ModelDownload.Failed(e.message ?: e.javaClass.simpleName))
         } finally {
-            part.delete()
+            connection?.disconnect()
+            if(!advanced)part.delete()
         }
     }.flowOn(Dispatchers.IO)
 
@@ -101,14 +111,15 @@ class VoskModelManager(private val context: Context) {
     }.flowOn(Dispatchers.IO)
 
     /** Unzips a model archive, dropping the single top-level folder most archives have. */
-    private fun install(zip: InputStream) {
+    private suspend fun install(zip: InputStream) {
         val root = File(context.filesDir, "vosk").apply { mkdirs() }
-        val staging = File(root, "staging")
+        val staging = File(root, if (advanced) "staging-advanced" else "staging")
         staging.deleteRecursively()
         staging.mkdirs()
         val canonicalStaging = staging.canonicalPath
         ZipInputStream(zip.buffered()).use { zis ->
             while (true) {
+                currentCoroutineContext().ensureActive()
                 val entry = zis.nextEntry ?: break
                 val target = File(staging, entry.name)
                 // Refuse entries that would escape the staging folder.
@@ -119,7 +130,10 @@ class VoskModelManager(private val context: Context) {
                     target.mkdirs()
                 } else {
                     target.parentFile?.mkdirs()
-                    FileOutputStream(target).use { zis.copyTo(it) }
+                    FileOutputStream(target).use { out ->
+                        val bytes=ByteArray(128*1024)
+                        while(true) { currentCoroutineContext().ensureActive();val n=zis.read(bytes);if(n<0)break;out.write(bytes,0,n) }
+                    }
                 }
             }
         }
@@ -138,6 +152,7 @@ class VoskModelManager(private val context: Context) {
     }
 
     companion object {
+        const val ADVANCED_MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-es-0.42.zip"
         const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
     }
 }

@@ -60,6 +60,12 @@ class MainActivity : ComponentActivity() {
      * assistant, for instance) keeps its formatting.
      */
     private fun handleIncoming(intent: Intent?) {
+        if (intent?.action == com.eliadca.talks.ui.notes.NotesRecordingService.OPEN_NOTE ||
+            intent?.getBooleanExtra(com.eliadca.talks.ui.notes.NotesRecordingService.OPEN_NOTE, false) == true) {
+            val id = intent.getLongExtra("note", 0)
+            if (id > 0) container.noteWorkspace.requestOpenFromNotification(id)
+            return
+        }
         when (intent?.action) {
             Intent.ACTION_VIEW -> intent.data?.let { home.importFiles(listOf(it)) }
             Intent.ACTION_SEND -> {
@@ -107,6 +113,12 @@ private fun TalksRoot() {
     val editor: EditorViewModel = viewModel()
     val exporter = androidx.compose.runtime.remember { Exporter(context) }
     val nav = rememberNavController()
+    val notesRequest = container.noteWorkspace.navigationRequest
+    LaunchedEffect(notesRequest) {
+        if (notesRequest > 0) {
+            nav.popBackStack("home", inclusive = false)
+        }
+    }
 
     TalksTheme(darkTheme = dark, accent = settings.appAccent, tone = settings.appTone) {
         NavHost(navController = nav, startDestination = "home") {

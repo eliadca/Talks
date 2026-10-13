@@ -46,7 +46,7 @@ fun SettingsRoute(
     val context = LocalContext.current
     val container = context.container
     val scope = rememberCoroutineScope()
-    val backup = remember { BackupManager(container.database, context.contentResolver) }
+    val backup = remember { BackupManager(container.database, context.contentResolver,java.io.File(context.filesDir,"notes-templates.json")) }
     val model = container.voskModel
     val voskInstalled by model.installed.collectAsState()
 
@@ -55,8 +55,9 @@ fun SettingsRoute(
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch {
             try {
+                container.notes.flush()
                 val r = backup.export(uri)
-                toast("Copia guardada: ${r.speeches} discursos.")
+                toast("Copia guardada: ${r.speeches} discursos y ${r.notes} notas.")
             } catch (e: Exception) {
                 toast("No se pudo guardar la copia: ${e.message}")
             }
@@ -66,7 +67,7 @@ fun SettingsRoute(
         if (uri != null) scope.launch {
             try {
                 val r = backup.import(uri)
-                toast("Restaurados ${r.speeches} discursos" + if (r.skipped > 0) " (${r.skipped} ya estaban)." else ".")
+                toast("Restaurados ${r.speeches} discursos y ${r.notes} notas" + if (r.skipped > 0) " (${r.skipped} ya estaban)." else ".")
             } catch (e: Exception) {
                 toast(e.message ?: "No se pudo restaurar la copia.")
             }
