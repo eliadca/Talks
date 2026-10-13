@@ -670,11 +670,11 @@ class AppFlowTest {
         compose.onNodeWithTag("note-body").performTextInput("Ideas para estudiar")
         androidx.test.espresso.Espresso.closeSoftKeyboard()
         compose.onNodeWithTag("note-body").performTextInputSelection(androidx.compose.ui.text.TextRange(0,5))
-        compose.onNodeWithContentDescription("Familia tipográfica").performClick()
-        compose.onNodeWithText("Lora").performClick()
         compose.onNodeWithContentDescription("Tamaño del texto").performTextReplacement("72")
         compose.onNodeWithContentDescription("Tamaño del texto").performImeAction()
         androidx.test.espresso.Espresso.closeSoftKeyboard()
+        compose.onNodeWithContentDescription("Familia tipográfica").performClick()
+        compose.onNodeWithText("Lora").performClick()
         compose.runOnUiThread {container.noteWorkspace.flushEdits()}
         runBlocking {
             container.notes.flush()
@@ -690,6 +690,7 @@ class AppFlowTest {
         Shots.take("notes-studio-eraser")
         compose.onNodeWithContentDescription("Plantillas de hojas").performClick()
         compose.onNodeWithTag("template-gallery").assertExists()
+        compose.onNodeWithText("Estudio y agenda").performClick()
         compose.onNodeWithContentDescription("Vista previa de Cornell / estudio").performClick()
         Shots.take("notes-studio-templates")
         compose.onNodeWithTag("apply-template").performClick()

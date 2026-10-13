@@ -93,6 +93,24 @@ class NotesUiTest {
         }
     }
 
+    @Test fun numericTextPropertiesKeepTheSelectedWordsWhenAndroidCollapsesTheFieldSelection() {
+        var body by mutableStateOf(TextFieldValue("Ideas para estudiar",TextRange(0,5)))
+        var ink by mutableStateOf(InkDocument())
+        compose.setContent {MaterialTheme {HandwritingNotePanel(body,{body=it},ink,{ink=it},false,false,{},{},Modifier.fillMaxSize(),
+            onFormat={transform->ink=ink.copy(formatting=ink.formatting.apply(body.selection.min,body.selection.max,transform))},textStyle=ink.formatting.styleAt(body.selection.min))}}
+        compose.onNodeWithTag("note-body").performTextInputSelection(TextRange(0,5))
+        compose.onNodeWithContentDescription("Familia tipográfica").performClick()
+        compose.onNodeWithText("Lora").performClick()
+        compose.onNodeWithContentDescription("Tamaño del texto").performTextReplacement("72")
+        compose.runOnIdle {body=body.copy(selection=TextRange(body.text.length))}
+        compose.onNodeWithContentDescription("Tamaño del texto").performImeAction()
+        compose.runOnIdle {
+            assertEquals(com.eliadca.talks.core.notes.NoteFont.LORA,ink.formatting.styleAt(0).font)
+            assertEquals(72f,ink.formatting.styleAt(0).size)
+            assertEquals(46f,ink.formatting.styleAt(7).size)
+        }
+    }
+
     @Test fun workspacePlacementAndZoomSurviveClosingAndReopeningTheEditor() {
         val context=androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
         context.getSharedPreferences("notes-pencil",0).edit().putFloat("zoom",1.4f).putBoolean("toolbar-side",true).commit()

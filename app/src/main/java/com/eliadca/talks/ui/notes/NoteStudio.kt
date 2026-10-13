@@ -37,6 +37,7 @@ import com.eliadca.talks.core.notes.*
 import kotlin.math.abs
 
 internal enum class StudioTab { PROPERTIES, LAYERS, LIBRARIES }
+internal data class StudioTextSelection(val id:Long,val range:TextRange,val prefix:String)
 
 /** Editor-only theme. The rest of Talks keeps its existing theme. */
 @Composable
@@ -58,28 +59,35 @@ internal class StudioActions(
     val align: (Int)->Unit,
     val list: (Boolean)->Unit,
     val editable: Boolean,
+    val captureSelection: ()->Unit,
 )
 
 internal fun studioActions(state: NoteEditorState, body: TextFieldValue, ink: InkDocument,
     onChange:(InkDocument)->Unit, textStyle: NoteTextStyle,
     onFormat:((NoteTextStyle)->NoteTextStyle)->Unit, onAlign:(Int)->Unit, onList:(Boolean)->Unit,
-    context:android.content.Context?=null): StudioActions {
+    context:android.content.Context?=null,onSelectTextRange:(TextRange)->Unit={}): StudioActions {
     val selectedBox=ink.textBoxes.singleOrNull {it.id in state.selected}
     val box=if(state.tool in listOf(InkTool.SELECT,InkTool.LASSO,InkTool.NODES)) selectedBox
         else ink.textBoxes.firstOrNull {it.id==state.activeBox}
     val entire=box!=null && box.id in state.selected && state.tool!=InkTool.TEXT
     val mainSelected=InkDocument.MAIN_TEXT_ID in state.selected
+    val text=box?.text ?: body.text
+    val id=box?.id ?: InkDocument.MAIN_TEXT_ID
+    // Android collapses a TextField's selection when a numeric property receives focus.
+    // Keep the intended range until the user returns to the page or changes tools.
+    val held=state.propertySelection?.takeIf {it.id==id && text.startsWith(it.prefix) && it.range.max<=text.length}
+    val range=held?.range ?: if(box!=null)state.boxSelection else body.selection
     val scale=box?.let {it.size/46f} ?: if(mainSelected) (ink.bodyFrame?.scale ?: 1f) else 1f
-    val style=box?.formatting?.styleAt(if(entire)0 else state.boxSelection.min)
-        ?: if(mainSelected)ink.formatting.styleAt(0) else textStyle
+    val style=box?.formatting?.styleAt(if(entire)0 else range.min)
+        ?: if(mainSelected)ink.formatting.styleAt(0) else if(held!=null)ink.formatting.styleAt(range.min) else textStyle
     val editable=(box?.id ?: InkDocument.MAIN_TEXT_ID) !in ink.lockedIds &&
         (state.selected.isEmpty() || mainSelected || box!=null || state.tool==InkTool.TEXT)
     return StudioActions(style.copy(size=style.size*scale), {transform->
         if(editable) {
             fun adjusted(s:NoteTextStyle)=transform(s.copy(size=s.size*scale)).let {it.copy(size=it.size/scale)}
             if(box!=null) {
-                val start=if(entire || state.boxSelection.collapsed)0 else state.boxSelection.min
-                val end=if(entire || state.boxSelection.collapsed)box.text.length else state.boxSelection.max
+                val start=if(entire || range.collapsed)0 else range.min
+                val end=if(entire || range.collapsed)box.text.length else range.max
                 val formatting=box.formatting.apply(start,end,::adjusted)
                 val height=maxOf(box.height,NoteArtworkExport.layout(box.text,formatting,box.width,box.size,box.color,box.size/46f,context).height+8f)
                 onChange(ink.copy(textBoxes=ink.textBoxes.map {if(it.id==box.id)it.copy(formatting=formatting,height=height) else it},height=maxOf(ink.height,box.y+height+100f)))
@@ -88,21 +96,24 @@ internal fun studioActions(state: NoteEditorState, body: TextFieldValue, ink: In
                 val frame=ink.bodyFrame ?: NoteTextFrame(width=ink.pageWidth-80f)
                 val height=NoteArtworkExport.layout(body.text,formatting,frame.width,46f,0xff232b3c.toInt(),frame.scale,context).height.toFloat()
                 onChange(ink.copy(formatting=formatting,bodyFrame=frame.copy(height=height),height=maxOf(ink.height,frame.y+height+100f)))
-            }
+            } else if(held!=null) onChange(ink.copy(formatting=ink.formatting.apply(range.min,range.max,transform)))
             else onFormat(transform)
         }
     }, {alignment->if(editable) {
-        if(box==null) {if(mainSelected)onChange(ink.copy(formatting=ink.formatting.align(body.text,0,body.text.length,alignment))) else onAlign(alignment)}
-        else onChange(ink.copy(textBoxes=ink.textBoxes.map {if(it.id==box.id)it.copy(formatting=it.formatting.align(it.text,if(entire)0 else state.boxSelection.min,if(entire)it.text.length else state.boxSelection.max,alignment)) else it}))
+        if(box==null) {if(mainSelected || held!=null)onChange(ink.copy(formatting=ink.formatting.align(body.text,if(mainSelected)0 else range.min,if(mainSelected)body.text.length else range.max,alignment))) else onAlign(alignment)}
+        else onChange(ink.copy(textBoxes=ink.textBoxes.map {if(it.id==box.id)it.copy(formatting=it.formatting.align(it.text,if(entire)0 else range.min,if(entire)it.text.length else range.max,alignment)) else it}))
     }}, {checklist->if(editable) {
-        if(box==null)onList(checklist) else {
-            val start=if(entire)0 else box.text.lastIndexOf('\n',(state.boxSelection.min-1).coerceAtLeast(-1))+1
-            val end=if(entire)box.text.length else box.text.indexOf('\n',state.boxSelection.max).takeIf {it>=0} ?: box.text.length
+        if(box==null) {if(mainSelected || held!=null)onSelectTextRange(if(mainSelected)TextRange(0,body.text.length) else range);onList(checklist)} else {
+            val start=if(entire)0 else box.text.lastIndexOf('\n',(range.min-1).coerceAtLeast(-1))+1
+            val end=if(entire)box.text.length else box.text.indexOf('\n',range.max).takeIf {it>=0} ?: box.text.length
             val prefix=if(checklist)"☐ " else "• ";val rows=box.text.substring(start,end).lines();val remove=rows.all {it.startsWith(prefix)}
             val text=box.text.replaceRange(start,end,rows.joinToString("\n") {if(remove)it.removePrefix(prefix) else prefix+it})
             onChange(ink.copy(textBoxes=ink.textBoxes.map {if(it.id==box.id)it.copy(text=text,formatting=it.formatting.replace(it.text,text)) else it}))
         }
-    }}, editable)
+    }}, editable, {
+        if(!range.collapsed && range.max<=text.length)state.propertySelection=StudioTextSelection(id,range,text.take(range.max))
+        else state.propertySelection=null
+    })
 }
 
 @Composable
@@ -110,13 +121,13 @@ internal fun NoteStudio(state:NoteEditorState,body:TextFieldValue,ink:InkDocumen
     canUndo:Boolean,canRedo:Boolean,onUndo:()->Unit,onRedo:()->Unit,modifier:Modifier,
     onFormat:((NoteTextStyle)->NoteTextStyle)->Unit,textStyle:NoteTextStyle,onAlign:(Int)->Unit,onList:(Boolean)->Unit,
     canUndoText:Boolean,canRedoText:Boolean,onUndoText:()->Unit,onRedoText:()->Unit,
-    onMoveTextSelection:()->Unit={}, crowded:Boolean=false, canvas:@Composable (Modifier)->Unit) {
+    onMoveTextSelection:()->Unit={}, crowded:Boolean=false,onSelectTextRange:(TextRange)->Unit={}, canvas:@Composable (Modifier)->Unit) {
     NoteStudioTheme {
-        val actions=studioActions(state,body,ink,onChange,textStyle,onFormat,onAlign,onList,LocalContext.current)
+        val actions=studioActions(state,body,ink,onChange,textStyle,onFormat,onAlign,onList,LocalContext.current,onSelectTextRange)
         Column(modifier.background(MaterialTheme.colorScheme.background).testTag("note-studio")) {
             StudioMenuBar(state,body,ink,onChange)
             NoteEditorToolbar(state,body,ink,onChange,canUndo,canRedo,onUndo,onRedo,onFormat,textStyle,onAlign,onList,
-                canUndoText,canRedoText,onUndoText,onRedoText,onMoveTextSelection)
+                canUndoText,canRedoText,onUndoText,onRedoText,onMoveTextSelection,onSelectTextRange)
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 val dockInspector=maxWidth>=960.dp && !crowded
                 LaunchedEffect(Unit) {if(maxWidth<960.dp || crowded)state.inspectorOpen=false}
@@ -197,7 +208,7 @@ internal fun StudioControlBar(state:NoteEditorState,actions:StudioActions,body:T
     canUndo:Boolean,canRedo:Boolean,onUndo:()->Unit,onRedo:()->Unit,
     canUndoText:Boolean,canRedoText:Boolean,onUndoText:()->Unit,onRedoText:()->Unit,onMoveTextSelection:()->Unit) {
     val keyboard=LocalSoftwareKeyboardController.current
-    fun choose(tool:InkTool) {state.tool=tool;state.selected=emptySet();state.inspectPage=false;state.inspectorTab=StudioTab.PROPERTIES;if(tool!=InkTool.TEXT)keyboard?.hide()}
+    fun choose(tool:InkTool) {state.tool=tool;state.selected=emptySet();state.propertySelection=null;state.inspectPage=false;state.inspectorTab=StudioTab.PROPERTIES;if(tool!=InkTool.TEXT)keyboard?.hide()}
     Surface(color=MaterialTheme.colorScheme.surface,shadowElevation=2.dp) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).heightIn(min=56.dp).padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
             StudioIcon(Icons.Filled.Keyboard,"Modo teclado",state.tool==InkTool.TEXT) {choose(InkTool.TEXT)}
@@ -207,9 +218,9 @@ internal fun StudioControlBar(state:NoteEditorState,actions:StudioActions,body:T
             StudioIcon(Icons.AutoMirrored.Filled.Redo,if(state.tool==InkTool.TEXT)"Rehacer texto" else "Rehacer escritura",enabled=if(state.tool==InkTool.TEXT)canRedoText else canRedo) {if(state.tool==InkTool.TEXT)onRedoText() else onRedo()}
             StudioSeparator()
             if(state.tool==InkTool.TEXT || ink.textBoxes.any {it.id in state.selected} || InkDocument.MAIN_TEXT_ID in state.selected) {
-                FontPicker(actions.style.font,actions.editable) {font->actions.format {it.copy(font=font)}}
+                FontPicker(actions.style.font,actions.editable,onOpen=actions.captureSelection) {font->actions.format {it.copy(font=font)}}
                 Spacer(Modifier.width(8.dp))
-                StudioNumber("Tamaño del texto",actions.style.size,1f..240f,Modifier.width(66.dp),enabled=actions.editable) {size->actions.format {it.copy(size=size)}}
+                StudioNumber("Tamaño del texto",actions.style.size,1f..240f,Modifier.width(66.dp),enabled=actions.editable,onStartEditing=actions.captureSelection) {size->actions.format {it.copy(size=size)}}
                 StudioIcon(Icons.Filled.Remove,"Reducir tamaño de texto",enabled=actions.editable) {actions.format {it.copy(size=(it.size-2).coerceAtLeast(1f))}}
                 StudioIcon(Icons.Filled.Add,"Aumentar tamaño de texto",enabled=actions.editable) {actions.format {it.copy(size=(it.size+2).coerceAtMost(240f))}}
                 StudioSeparator()
@@ -234,11 +245,11 @@ internal fun StudioControlBar(state:NoteEditorState,actions:StudioActions,body:T
 }
 
 @Composable
-internal fun FontPicker(font:NoteFont,enabled:Boolean=true,onFont:(NoteFont)->Unit) {
+internal fun FontPicker(font:NoteFont,enabled:Boolean=true,onOpen:()->Unit={},onFont:(NoteFont)->Unit) {
     var open by remember {mutableStateOf(false)}
     Box {
         Surface(shape=RoundedCornerShape(4.dp),color=MaterialTheme.colorScheme.surfaceContainerLow,border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) {
-            Row(Modifier.width(152.dp).height(44.dp).clickable(enabled=enabled) {open=true}.padding(horizontal=10.dp)
+            Row(Modifier.width(152.dp).height(44.dp).clickable(enabled=enabled) {onOpen();open=true}.padding(horizontal=10.dp)
                 .semantics {contentDescription="Familia tipográfica"},verticalAlignment=Alignment.CenterVertically) {
                 Text(NoteFonts.label(font),Modifier.weight(1f),fontFamily=NoteFonts.family(font),fontSize=15.sp)
                 Icon(Icons.Filled.ArrowDropDown,null,Modifier.size(18.dp))
@@ -255,14 +266,14 @@ internal fun FontPicker(font:NoteFont,enabled:Boolean=true,onFont:(NoteFont)->Un
 internal fun number(value:Float)=if(abs(value-value.toInt())<.01f)value.toInt().toString() else "%.1f".format(java.util.Locale.ROOT,value)
 
 @Composable
-internal fun StudioNumber(label:String,value:Float,range:ClosedFloatingPointRange<Float>,modifier:Modifier=Modifier,enabled:Boolean=true,onValue:(Float)->Unit) {
+internal fun StudioNumber(label:String,value:Float,range:ClosedFloatingPointRange<Float>,modifier:Modifier=Modifier,enabled:Boolean=true,onStartEditing:()->Unit={},onValue:(Float)->Unit) {
     var edit by remember(value) {mutableStateOf(number(value))}
     val keyboard=LocalSoftwareKeyboardController.current
     var hadFocus by remember {mutableStateOf(false)}
     fun commit(hideKeyboard:Boolean=true) {val n=edit.replace(',','.').toFloatOrNull();if(n!=null && n.isFinite() && n in range && n!=value)onValue(n) else edit=number(value);if(hideKeyboard)keyboard?.hide()}
     Surface(modifier,shape=RoundedCornerShape(4.dp),color=MaterialTheme.colorScheme.surfaceContainerLow,
         border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) {
-        BasicTextField(edit,{edit=it},Modifier.height(44.dp).padding(horizontal=10.dp).onFocusChanged {if(hadFocus && !it.isFocused)commit(false);hadFocus=it.isFocused}.semantics {contentDescription=label},enabled=enabled,singleLine=true,
+        BasicTextField(edit,{edit=it},Modifier.height(44.dp).padding(horizontal=10.dp).onFocusChanged {if(!hadFocus && it.isFocused)onStartEditing();if(hadFocus && !it.isFocused)commit(false);hadFocus=it.isFocused}.semantics {contentDescription=label},enabled=enabled,singleLine=true,
             textStyle=MaterialTheme.typography.bodyMedium.copy(color=if(enabled)MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant),
             keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal,imeAction=ImeAction.Done),keyboardActions=KeyboardActions(onDone={commit()}),
             decorationBox={field->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.CenterStart) {field()}})
@@ -281,7 +292,7 @@ internal fun StudioIcon(icon:ImageVector,label:String,selected:Boolean=false,ena
 @Composable
 private fun StudioPalette(state:NoteEditorState,body:TextFieldValue,ink:InkDocument,onChange:(InkDocument)->Unit,modifier:Modifier,twoColumns:Boolean,horizontal:Boolean=false) {
     val keyboard=LocalSoftwareKeyboardController.current
-    fun choose(tool:InkTool) {state.tool=tool;state.selected=emptySet();state.inspectPage=false;state.inspectorOpen=true;state.inspectorTab=StudioTab.PROPERTIES;if(tool!=InkTool.TEXT)keyboard?.hide()}
+    fun choose(tool:InkTool) {state.tool=tool;state.selected=emptySet();state.propertySelection=null;state.inspectPage=false;state.inspectorOpen=true;state.inspectorTab=StudioTab.PROPERTIES;if(tool!=InkTool.TEXT)keyboard?.hide()}
     @Composable fun group(label:String,content:@Composable ()->Unit) {
         if(horizontal) Row(verticalAlignment=Alignment.CenterVertically) {content();StudioSeparator()}
         else Column(Modifier.fillMaxWidth().padding(vertical=5.dp),horizontalAlignment=Alignment.CenterHorizontally) {
@@ -417,18 +428,18 @@ private fun TextInspector(actions:StudioActions) {
         Text("Familia tipográfica",fontSize=11.sp)
         // The main bar provides the only font picker; this entry brings it into view on small screens.
         var fontMenu by remember {mutableStateOf(false)}
-        Box {OutlinedButton({fontMenu=true},Modifier.fillMaxWidth(),enabled=actions.editable) {Text(NoteFonts.label(actions.style.font),Modifier.weight(1f),fontFamily=NoteFonts.family(actions.style.font));Icon(Icons.Filled.ArrowDropDown,null)}
+        Box {OutlinedButton({actions.captureSelection();fontMenu=true},Modifier.fillMaxWidth(),enabled=actions.editable) {Text(NoteFonts.label(actions.style.font),Modifier.weight(1f),fontFamily=NoteFonts.family(actions.style.font));Icon(Icons.Filled.ArrowDropDown,null)}
             DropdownMenu(fontMenu,{fontMenu=false}) {NoteFont.entries.forEach {font->DropdownMenuItem(text={Text(NoteFonts.label(font),fontFamily=NoteFonts.family(font),fontSize=19.sp)},onClick={actions.format {it.copy(font=font)};fontMenu=false})}}
         }
         Row(verticalAlignment=Alignment.CenterVertically) {
             Text("Tamaño",Modifier.weight(1f),fontSize=12.sp)
-            StudioNumber("Tamaño en propiedades",actions.style.size,1f..240f,Modifier.width(100.dp),actions.editable) {size->actions.format {it.copy(size=size)}}
+            StudioNumber("Tamaño en propiedades",actions.style.size,1f..240f,Modifier.width(100.dp),actions.editable,onStartEditing=actions.captureSelection) {size->actions.format {it.copy(size=size)}}
         }
         Row {StudioIcon(Icons.Filled.FormatBold,"Negrita en propiedades",actions.style.bold,actions.editable) {actions.format {it.copy(bold=!actions.style.bold)}}
             StudioIcon(Icons.Filled.FormatItalic,"Cursiva en propiedades",actions.style.italic,actions.editable) {actions.format {it.copy(italic=!actions.style.italic)}}
             StudioIcon(Icons.Filled.FormatUnderlined,"Subrayado en propiedades",actions.style.underline,actions.editable) {actions.format {it.copy(underline=!actions.style.underline)}}
             StudioIcon(Icons.Filled.FormatStrikethrough,"Tachado",actions.style.strike,actions.editable) {actions.format {it.copy(strike=!actions.style.strike)}}}
-        Row(verticalAlignment=Alignment.CenterVertically) {Text("Espacio entre letras",Modifier.weight(1f),fontSize=12.sp);StudioNumber("Espaciado de letras",actions.style.tracking,-4f..20f,Modifier.width(72.dp),actions.editable) {v->actions.format {it.copy(tracking=v)}}}
+        Row(verticalAlignment=Alignment.CenterVertically) {Text("Espacio entre letras",Modifier.weight(1f),fontSize=12.sp);StudioNumber("Espaciado de letras",actions.style.tracking,-4f..20f,Modifier.width(72.dp),actions.editable,onStartEditing=actions.captureSelection) {v->actions.format {it.copy(tracking=v)}}}
         Text("Color del texto",fontSize=11.sp);StudioColors(actions.style.color ?: 0xff232b3c.toInt(),"Texto",actions.editable) {color->actions.format {it.copy(color=color)}}
         Text("Resaltado",fontSize=11.sp);StudioColors(actions.style.highlight ?: 0x00000000,"Resaltar",actions.editable) {color->actions.format {it.copy(highlight=(color and 0xffffff) or 0x44000000)}}
         TextButton({actions.format {it.copy(highlight=null)}},enabled=actions.editable) {Text("Quitar resaltado",fontSize=12.sp)}

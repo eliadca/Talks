@@ -84,6 +84,7 @@ class NoteEditorState {
     var appearance by mutableStateOf(false)
     var activeBox by mutableStateOf<Long?>(null)
     var boxSelection by mutableStateOf(TextRange(0))
+    internal var propertySelection by mutableStateOf<StudioTextSelection?>(null)
     var selected by mutableStateOf(emptySet<Long>())
     companion object {
         val Saver = androidx.compose.runtime.saveable.listSaver<NoteEditorState, Any>(
@@ -145,7 +146,7 @@ fun HandwritingNotePanel(
     canUndoText: Boolean = false, canRedoText: Boolean = false, onUndoText: () -> Unit = {}, onRedoText: () -> Unit = {},
 ) {
     if(showToolbar) NoteStudio(state,body,ink,onInkChange,canUndo,canRedo,onUndo,onRedo,modifier,
-        onFormat,textStyle,onAlign,onList,canUndoText,canRedoText,onUndoText,onRedoText) {pageModifier->
+        onFormat,textStyle,onAlign,onList,canUndoText,canRedoText,onUndoText,onRedoText,onSelectTextRange={onEdit(body.copy(selection=it))}) {pageModifier->
         NotebookPage(body,onEdit,ink,onInkChange,state,onReference,onReferenceAt,onAnchorChanged,pageModifier)
     } else Surface(modifier,color=MaterialTheme.colorScheme.background) {
         NotebookPage(body,onEdit,ink,onInkChange,state,onReference,onReferenceAt,onAnchorChanged,Modifier.fillMaxSize())
@@ -160,14 +161,15 @@ fun NoteEditorToolbar(state: NoteEditorState, body: TextFieldValue, ink: InkDocu
     onAlign: (Int) -> Unit = {}, onList: (Boolean) -> Unit = {},
     canUndoText: Boolean = false, canRedoText: Boolean = false, onUndoText: () -> Unit = {}, onRedoText: () -> Unit = {},
     onMoveTextSelection: () -> Unit = {},
+    onSelectTextRange: (TextRange) -> Unit = {},
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
     LaunchedEffect(ink.strokes, ink.textBoxes,ink.images,ink.lockedIds,ink.hiddenIds, body.text) { state.selected = (state.selected-ink.lockedIds-ink.hiddenIds).intersect((ink.strokes.map { it.id } + ink.textBoxes.map { it.id } + ink.images.map {it.id} + if (body.text.isNotEmpty()) listOf(InkDocument.MAIN_TEXT_ID) else emptyList()).toSet()) }
-    val actions=studioActions(state,body,ink,onInkChange,textStyle,onFormat,onAlign,onList,context)
+    val actions=studioActions(state,body,ink,onInkChange,textStyle,onFormat,onAlign,onList,context,onSelectTextRange)
     val effectiveStyle=actions.style
     fun format(transform:(com.eliadca.talks.core.notes.NoteTextStyle)->com.eliadca.talks.core.notes.NoteTextStyle) = actions.format(transform)
-    fun choose(tool:InkTool) {state.tool=tool;state.selected=emptySet();if(tool!=InkTool.TEXT)keyboard?.hide()}
+    fun choose(tool:InkTool) {state.tool=tool;state.selected=emptySet();state.propertySelection=null;if(tool!=InkTool.TEXT)keyboard?.hide()}
     StudioControlBar(state,actions,body,ink,canUndo,canRedo,onUndo,onRedo,canUndoText,canRedoText,onUndoText,onRedoText,onMoveTextSelection)
     NoteMediaTools(state,ink,onInkChange)
     NoteVectorAppearance(state,ink,onInkChange)
@@ -362,14 +364,14 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
                     AndroidView(factory = { InkPageView(it) }, modifier = Modifier.fillMaxSize().testTag(if(input || !writing)"ink-page" else "ink-artwork"), update = {
                         it.document = if(input)ink.copy(bodyFrame=measured.bodyFrame) else measured; it.drawContent = !input; it.drawTextBoxes = false; it.onPreview = { preview -> state.preview = preview }; it.tool = if(input)state.tool else InkTool.MOVE; it.shape = state.shape; it.pen = state.pen; it.penColor = state.color; it.penWidth = state.width
                         it.eraserMode = state.eraserMode; it.eraserRadius = state.eraserRadius; it.usePressure = state.pressure; it.stylusOnly = state.stylusOnly; it.ruleColor = ruleColor
-                        it.selection = state.selected; it.onSelectionChange = { selected -> state.selected = selected }
+                        it.selection = state.selected; it.onSelectionChange = { selected -> state.selected = selected;state.propertySelection=null }
                         it.onChange = onInkChange; it.onAreaFinished = { state.tool = InkTool.PEN }
                     })
                 }
                 inkLayer(false)
                 if(InkDocument.MAIN_TEXT_ID !in ink.hiddenIds) BibleLinkedTextField(body, onEdit, readOnly = state.tool != InkTool.TEXT || InkDocument.MAIN_TEXT_ID in ink.lockedIds, linksEnabled = !writing, onReference = onReference,
                     onReferenceAt = onReferenceAt, onAnchorChanged = onAnchorChanged, formatting = ink.formatting, textScale = factor * shownFrame.scale,
-                    modifier = Modifier.offset((shownFrame.x * factor).dp, (shownFrame.y * factor).dp).width((shownFrame.width * factor).dp).onFocusChanged {if(it.isFocused)state.activeBox=null}.testTag("note-body"),
+                    modifier = Modifier.offset((shownFrame.x * factor).dp, (shownFrame.y * factor).dp).width((shownFrame.width * factor).dp).onFocusChanged {if(it.isFocused) {state.activeBox=null;state.propertySelection=null}}.testTag("note-body"),
                     textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = (46 * factor * shownFrame.scale).sp,
                         lineHeight = (64 * factor * shownFrame.scale).sp, color = Color(0xff232b3c)),
                     onTextLayout = { result -> textHeight = result.multiParagraph.height / density.density / factor },
@@ -391,7 +393,7 @@ private fun NotebookPage(body: TextFieldValue, onEdit: (TextFieldValue) -> Unit,
                         }, readOnly = state.tool != InkTool.TEXT || box.id in ink.lockedIds, linksEnabled = !writing, onReference = onReference,
                             onReferenceAt = onReferenceAt, onAnchorChanged = onAnchorChanged, formatting = box.formatting,
                             textScale = factor * box.size / 46f,
-                            modifier = Modifier.offset((box.x * factor).dp, (box.y * factor).dp).width((box.width * factor).dp).onFocusChanged {if(it.isFocused) {state.activeBox=box.id;state.boxSelection=value.selection}}.testTag("text-box-${box.id}"),
+                            modifier = Modifier.offset((box.x * factor).dp, (box.y * factor).dp).width((box.width * factor).dp).onFocusChanged {if(it.isFocused) {state.activeBox=box.id;state.boxSelection=value.selection;state.propertySelection=null}}.testTag("text-box-${box.id}"),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = (box.size * factor).sp,
                                 lineHeight = (box.size * factor * 1.4f).sp, color = Color(box.color)), onTextLayout = {})
                     }

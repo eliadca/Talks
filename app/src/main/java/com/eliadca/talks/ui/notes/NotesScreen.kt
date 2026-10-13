@@ -337,7 +337,7 @@ fun NotesWorkspace(
     val density = LocalDensity.current
     BackHandler(panelOpen && allowBack) { panelOpen = false }
     NoteStudio(editorState,body,ink,onInkChange,canUndoInk,canRedoInk,onUndoInk,onRedoInk,modifier.fillMaxSize().imePadding(),
-        onFormat,textStyle,onAlign,onList,canUndoText,canRedoText,onUndoText,onRedoText,onMoveTextSelection,crowded=panelOpen && dock==VoiceDock.RIGHT) {canvasModifier->
+        onFormat,textStyle,onAlign,onList,canUndoText,canRedoText,onUndoText,onRedoText,onMoveTextSelection,crowded=panelOpen && dock==VoiceDock.RIGHT,onSelectTextRange={onEdit(body.copy(selection=it))}) {canvasModifier->
         BoxWithConstraints(canvasModifier) {
 
             val availableWidth = maxWidth.value; val availableHeight = maxHeight.value
